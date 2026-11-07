@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0c0e14" />
+  <meta name="description" content="Oddly is a tiny digital playground filled with interactive experiments, sounds, colors and creative distractions." />
+  <title>oddly. — a digital playground</title>
+  <style>
+
+    :root { color-scheme: dark; --bg: #0c0e14; --surface: #151820; --surface2: #1b1e27; --line: #30323b; --white: #f5f4ed; --muted: #a0a2af; --lime: #d5fc66; --purple: #ae94fa; --pink: #fca9a4; --blue: #92c7fb; --radius: 23px; }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; background: var(--bg); color: var(--white); font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+    body::before { content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 20; opacity: .17; background: radial-gradient(circle at var(--mx, 50%) var(--my, 30%), rgba(174,148,250,.075), transparent 32%); }
+    ::selection { background: var(--lime); color: #141414; }
+    button, input { font: inherit; }
+    button { cursor: pointer; }
+    button:focus-visible, a:focus-visible, input:focus-visible, canvas:focus-visible { outline: 2px solid var(--lime); outline-offset: 4px; }
+    a { color: inherit; text-decoration: none; }
+    .wrap { width: min(1370px, calc(100% - 88px)); margin: 0 auto; }
+    .mono { font-family: ui-monospace, 'SFMono-Regular', 'Menlo', Consolas, monospace; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
+    .topbar { height: 89px; border-bottom: 1px solid #2b2d36; display: flex; align-items: center; position: relative; z-index: 12; }
+    .topbar-inner { display: flex; justify-content: space-between; align-items: center; gap: 20px; }
+    .brand { display: flex; align-items: center; gap: 10px; font-size: 29px; letter-spacing: -.075em; font-weight: 700; }
+    .brand-mark { width: 28px; height: 28px; background: var(--lime); color: #111; display: grid; place-items: center; border-radius: 8px; font-size: 22px; transform: rotate(-12deg); }
+    .nav-links { display: flex; gap: 37px; align-items: center; }
+    .nav-links a { color: #b9b9c3; font-size: 13px; font-weight: 600; transition: color .2s; }
+    .nav-links a:hover { color: var(--white); }
+    .header-right { display: flex; align-items: center; gap: 14px; }
+    .online { border: 1px solid #3c4233; border-radius: 30px; padding: 11px 14px; display: flex; align-items: center; gap: 9px; color: var(--lime); }
+    .online i { width: 6px; height: 6px; background: var(--lime); border-radius: 50%; box-shadow: 0 0 14px var(--lime); }
+    .round-button { width: 40px; height: 40px; display: grid; place-items: center; background: #252831; color: var(--white); border: 1px solid var(--line); border-radius: 50%; transition: .2s; font-size: 19px; }
+    .round-button:hover { transform: rotate(25deg); background: #33363e; }
+    .hero { display: grid; grid-template-columns: 1.08fr .92fr; align-items: center; gap: 52px; min-height: 688px; padding: 65px 0 76px; }
+    .eyebrow { display: inline-flex; align-items: center; gap: 13px; color: var(--lime); font-size: 11px; letter-spacing: .13em; margin-bottom: 28px; }
+    .eyebrow::before { content: ''; display: inline-block; height: 1px; width: 35px; background: currentColor; }
+    .hero h1 { font-size: clamp(69px, 7.3vw, 124px); line-height: .92; letter-spacing: -.097em; font-weight: 700; margin: 0; }
+    .hero h1 span { display: block; }
+    .hero h1 .special { color: var(--lime); position: relative; display: inline-block; }
+    .hero h1 .special::after { content: ''; position: absolute; height: 7px; border: 2px solid var(--lime); border-left: 0; border-right: 0; border-radius: 50%; bottom: -12px; left: 0; right: 8%; transform: rotate(-3deg); opacity: .65; }
+    .hero-desc { color: #acabb5; font-size: 16px; line-height: 1.8; max-width: 435px; margin: 35px 0 32px; }
+    .hero-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 20px; }
+    .cta { display: inline-flex; justify-content: center; align-items: center; gap: 26px; border: 0; background: var(--lime); color: #101410; font-weight: 700; border-radius: 13px; padding: 18px 21px; font-size: 14px; min-height: 55px; transition: transform .2s, box-shadow .2s; }
+    .cta:hover { transform: translateY(-3px); box-shadow: 0 13px 30px #d5fc6630; }
+    .plain-btn { background: none; border: 0; color: #e9e9ec; font-size: 13px; font-weight: 600; padding: 13px 4px; }
+    .plain-btn:hover { color: var(--lime); }
+    .hero-foot { display: flex; align-items: center; gap: 15px; margin-top: 56px; color: #8f909b; }
+    .tiny-avatars { display: flex; padding-left: 2px; }
+    .tiny-avatars span { width: 27px; height: 27px; margin-left: -3px; border-radius: 50%; display: grid; place-items: center; border: 2px solid var(--bg); font-size: 11px; background: #6e5d8b; }
+    .tiny-avatars span:nth-child(2) { background: #ffba7d; } .tiny-avatars span:nth-child(3) { background: #819da9; }
+    .hero-foot .mono { font-size: 10px; line-height: 1.7; letter-spacing: .04em; text-transform: none; }
+    .hero-art { height: min(560px, 44vw); min-height: 440px; position: relative; border: 1px solid #353642; background: radial-gradient(circle at 50% 48%, #282137 0%, #171923 53%, #12151c 100%); border-radius: 27px; display: grid; place-items: center; overflow: hidden; isolation: isolate; }
+    .hero-art::after { content: ''; position: absolute; inset: 0; background-image: radial-gradient(#85878e40 .7px, transparent .7px); background-size: 20px 20px; mask-image: linear-gradient(to bottom, black, transparent); opacity: .45; z-index: -1; }
+    .art-top, .art-bottom { display: flex; align-items: center; justify-content: space-between; position: absolute; left: 27px; right: 27px; z-index: 3; color: #cacbd3; }
+    .art-top { top: 26px; }.art-bottom { bottom: 23px; }
+    .art-num { font-size: 13px; color: var(--lime); }
+    .art-dot { display: inline-block; margin-right: 8px; width: 7px; height: 7px; border-radius: 50%; background: #8e79e9; }
+    .art-core { width: 245px; height: 245px; border-radius: 50%; position: relative; transform: translate(var(--px,0px),var(--py,0px)); transition: transform .15s ease-out; display: grid; place-items: center; }
+    .orbit-ring { width: 390px; height: 390px; position: absolute; top: 50%; left: 50%; border: 1px solid #64607170; border-radius: 50%; transform: translate(-50%, -50%) rotate(-28deg) scaleY(.66); }
+    .orbit-ring.r2 { width: 490px; height: 490px; transform: translate(-50%, -50%) rotate(62deg) scaleY(.75); opacity: .55; }
+    .orbit-ring.r3 { width: 290px; height: 290px; transform: translate(-50%, -50%) rotate(40deg) scaleY(.92); opacity: .4; }
+    .blob { width: 236px; height: 236px; background: radial-gradient(circle at 26% 26%, #f9dbff 1%, #c8affc 25%, #9984f0 53%, #6c55ba 80%); border-radius: 47% 53% 61% 39% / 48% 42% 58% 52%; box-shadow: inset -21px -19px 32px #4d398f99, inset 15px 11px 28px #ffffff52, 0 22px 100px #ab8bf84f; animation: wobble 7s ease-in-out infinite alternate; cursor: pointer; border: 0; position: relative; z-index: 2; transition: filter .3s; }
+    .blob::before { content: ''; position: absolute; width: 73px; height: 30px; border-radius: 50%; left: 26px; top: 26px; transform: rotate(-36deg); background: #ffffff55; filter: blur(9px); }
+    .blob:hover { filter: saturate(1.3) brightness(1.1); }
+    @keyframes wobble { 0% { border-radius: 47% 53% 61% 39% / 48% 42% 58% 52%; transform: rotate(-10deg) scale(1); } 100% { border-radius: 58% 42% 37% 63% / 56% 61% 39% 44%; transform: rotate(18deg) scale(1.07); } }
+    .satellite { position: absolute; z-index: 3; border-radius: 50%; }
+    .satellite.one { width: 35px; height: 35px; background: var(--lime); left: 18%; top: 20%; box-shadow: 0 0 35px #d5fc6655; }
+    .satellite.two { width: 19px; height: 19px; background: #ffa89e; right: 15%; bottom: 27%; }
+    .satellite.three { width: 10px; height: 10px; background: #88baf6; right: 28%; top: 16%; }
+    .art-pill { border: 1px solid #4d4d5a; border-radius: 25px; padding: 9px 13px; background: #181a23aa; backdrop-filter: blur(10px); font-size: 9px; }
+    .art-note { position: absolute; right: 30px; top: 98px; transform: rotate(8deg); color: #aaa6bb; font-size: 11px; }
+    .tape { border-block: 1px solid #34363e; background: #15171e; overflow: hidden; white-space: nowrap; }
+    .tape-content { display: flex; align-items: center; gap: 36px; width: max-content; padding: 17px 0; animation: marquee 28s linear infinite; }
+    .tape-content span { color: #a8a7b0; font-size: 11px; letter-spacing: .11em; }
+    .tape-content b { color: var(--lime); font-size: 12px; font-weight: 400; }
+    @keyframes marquee { to { transform: translateX(-50%); } }
+    .section-title { display: flex; justify-content: space-between; align-items: flex-end; gap: 25px; padding: 94px 0 37px; }
+    .section-title .mono { color: var(--lime); }
+    .section-title h2 { font-size: clamp(42px, 5vw, 72px); line-height: 1; letter-spacing: -.075em; margin: 13px 0 0; }
+    .section-title h2 em { color: var(--purple); font-style: normal; }
+    .section-title p { font-size: 13px; color: #aaaab5; max-width: 300px; line-height: 1.65; margin-bottom: 4px; }
+    .experiments { display: grid; grid-template-columns: repeat(12,minmax(0,1fr)); gap: 18px; }
+    .module { border: 1px solid #343640; border-radius: var(--radius); background: var(--surface); min-width: 0; position: relative; overflow: hidden; transition: border-color .25s, transform .25s; }
+    .module:hover { border-color: #666674; }
+    .span7 { grid-column: span 7; }.span5 { grid-column: span 5; }.span6 { grid-column: span 6; }
+    .module-head { display: flex; justify-content: space-between; gap: 12px; padding: 27px 29px 21px; align-items: flex-start; }
+    .module-index { display: flex; align-items: center; gap: 11px; color: #aaa9b4; font-size: 10px; margin-bottom: 11px; }
+    .module-index .line { height: 1px; width: 20px; background: #7a7984; }
+    .module h3 { font-size: clamp(23px, 2.25vw, 32px); margin: 0; letter-spacing: -.055em; }
+    .module-sub { color: #a3a4af; margin: 8px 0 0; line-height: 1.5; font-size: 12px; }
+    .module-icon { display: grid; place-items: center; height: 39px; width: 39px; font-size: 20px; border: 1px solid #41424c; border-radius: 11px; color: var(--lime); }
+    .canvas-frame { height: 301px; margin: 0 15px; border: 1px solid #3b3b47; border-radius: 14px; background: radial-gradient(ellipse at center, #242237, #11131c 72%); overflow: hidden; position: relative; }
+    #particleCanvas { width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; }
+    .canvas-label { position: absolute; pointer-events: none; top: 15px; left: 18px; color: #9792aa; font-size: 9px; }
+    .canvas-count { position: absolute; pointer-events: none; bottom: 15px; right: 17px; color: #a8a2c8; font-size: 9px; }
+    .controls { display: flex; gap: 10px; padding: 17px 22px 22px; align-items: center; flex-wrap: wrap; }
+    .chip, .small-btn { border: 1px solid #454650; color: #eeeef2; background: #252832; border-radius: 9px; padding: 10px 14px; font-size: 11px; font-weight: 600; min-height: 37px; transition: .15s; }
+    .chip.active { background: var(--lime); color: #131615; border-color: var(--lime); }
+    .chip:hover:not(.active), .small-btn:hover { border-color: #92929b; background: #333741; }
+    .control-hint { margin-left: auto; color: #858692; font-size: 10px; }
+    .sound-pad-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 10px; padding: 0 20px; }
+    .sound-pad { height: 110px; position: relative; border: 1px solid #484a56; background: #252832; color: #d9d9de; border-radius: 13px; text-align: left; padding: 12px; display: flex; flex-direction: column; justify-content: space-between; transition: background .13s, transform .13s, border-color .13s; user-select: none; }
+    .sound-pad:hover { transform: translateY(-3px); border-color: #858592; }
+    .sound-pad.selected { background: #312d3b; border-color: #977dba; }
+    .sound-pad.playing { background: var(--purple); border-color: var(--purple); color: #17121e; transform: scale(.95); }
+    .pad-key { opacity: .55; font-size: 10px; }
+    .pad-note { font-size: 24px; font-weight: 700; letter-spacing: -.07em; }
+    .sound-controls { display: flex; gap: 12px; align-items: center; padding: 16px 20px 22px; flex-wrap: wrap; }
+    .loop-btn { display: flex; align-items: center; gap: 8px; background: var(--purple); color: #171320; border: 0; border-radius: 9px; min-height: 38px; padding: 8px 13px; font-size: 11px; font-weight: 700; }
+    .loop-btn.is-playing { background: var(--pink); }
+    .bpm-control { display: flex; gap: 7px; align-items: center; color: #a5a2b2; margin-left: auto; font-size: 10px; }
+    input[type="range"] { accent-color: var(--lime); cursor: pointer; }
+    #bpm { width: 85px; }
+    .mood-preview { height: 244px; margin: 0 15px; border-radius: 14px; position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg,#df9ff2,#8baefd); color: #fff; }
+    .mood-preview::before { content: ''; position: absolute; width: 230px; height: 230px; border: 1px solid #ffffff89; border-radius: 50%; top: -130px; left: -80px; box-shadow: 0 0 0 50px #ffffff17, 0 0 0 100px #ffffff14; }
+    .mood-preview::after { content: '✳'; position: absolute; font-size: 200px; right: -26px; bottom: -115px; color: #ffffff24; transform: rotate(-15deg); }
+    .mood-preview strong { font-size: clamp(32px, 4vw, 54px); letter-spacing: -.085em; z-index: 1; text-shadow: 0 2px 20px #4a315a44; transform: rotate(-7deg); }
+    .mood-sliders { display: grid; gap: 12px; padding: 20px 25px 0; }
+    .slider-line { display: flex; align-items: center; gap: 15px; }
+    .slider-line span { color: #bcbac4; font-size: 10px; width: 67px; }
+    .slider-line input { flex: 1; min-width: 0; }
+    .slider-line output { color: #dddce2; text-align: right; width: 33px; font-size: 10px; }
+    .mood-controls { padding-top: 20px; }
+    .reflex-stage { height: 268px; margin: 0 15px; border: 1px solid #3b3e4b; border-radius: 14px; width: calc(100% - 30px); text-align: center; padding: 20px; color: var(--white); background: #252537; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 13px; transition: background .18s; }
+    .reflex-stage.waiting { background: #bd8e49; color: #171417; }.reflex-stage.now { background: #d5fc66; color: #1a2211; }.reflex-stage.too-soon { background: #f58f90; color: #2b1313; }.reflex-stage.finished { background: #a891f4; color: #211633; }
+    .reflex-emoji { font-size: 47px; line-height: 1; }
+    .reflex-big { font-size: clamp(25px, 3vw, 40px); font-weight: 700; letter-spacing: -.065em; }
+    .reflex-tiny { max-width: 270px; font-size: 11px; line-height: 1.5; opacity: .8; }
+    .reflex-scores { display: flex; justify-content: space-between; align-items: center; padding: 19px 25px 22px; gap: 20px; }
+    .score { display: flex; align-items: center; gap: 10px; }
+    .score span { color: #999ba6; font-size: 10px; }.score strong { font-size: 21px; font-weight: 600; letter-spacing: -.04em; }
+    .score strong.best { color: var(--lime); }
+    .type-stage { height: 244px; margin: 0 15px; border-radius: 14px; background: #c8b6fc; position: relative; display: grid; place-items: center; overflow: hidden; color: #22163e; }
+    .type-stage::before { content: ''; inset: 0; position: absolute; background-image: linear-gradient(#21193b1c 1px,transparent 1px),linear-gradient(90deg,#21193b1c 1px,transparent 1px); background-size: 32px 32px; }
+    .type-preview { position: relative; font-size: 68px; font-weight: 700; letter-spacing: -.075em; line-height: .92; text-align: center; width: 95%; overflow-wrap: anywhere; transform: rotate(-5deg); text-shadow: 4px 5px 0 #f5f4ed; transition: transform .15s, font-size .15s, letter-spacing .15s; }
+    .stage-corner { position: absolute; z-index: 2; top: 16px; left: 16px; color: #473e65; }
+    .stage-corner.right { left: auto; right: 16px; }
+    .type-controls { padding: 20px 24px 0; display: grid; gap: 14px; }
+    .type-text { width: 100%; height: 40px; border-radius: 9px; border: 1px solid #4a4a56; color: #fff; background: #23262f; padding: 0 14px; font-size: 12px; }
+    .type-options { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 13px; }
+    .type-option { display: grid; gap: 5px; }
+    .type-option label { color: #9f9fa9; font-size: 10px; }
+    .type-option input { width: 100%; margin: 0; }
+    .doodle-board { height: 253px; margin: 0 15px; border-radius: 13px; border: 1px solid #6e6c71; background: #fbf9ee; overflow: hidden; }
+    #doodleCanvas { height: 100%; width: 100%; display: block; cursor: crosshair; touch-action: none; }
+    .doodle-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; padding: 17px 20px 21px; }
+    .swatch { width: 29px; height: 29px; border-radius: 50%; background: var(--swatch); border: 3px solid transparent; box-shadow: inset 0 0 0 1px #0002; }
+    .swatch.active { outline: 2px solid var(--white); outline-offset: 2px; }
+    .brush { display: flex; align-items: center; gap: 7px; margin: 0 auto 0 8px; font-size: 10px; color: #999aa5; }
+    #brushSize { width: 65px; }
+    .module-tip { padding: 0 24px 19px; color: #797a85; font-size: 10px; line-height: 1.5; }
+    .footer-banner { margin: 110px 0 45px; background: var(--lime); border-radius: 24px; min-height: 240px; color: #141913; display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: center; padding: 41px 56px; position: relative; overflow: hidden; }
+    .footer-banner::before { content: '✳'; font-size: 270px; line-height: 1; position: absolute; right: 18%; top: -72px; opacity: .09; }
+    .footer-banner .mono { color: #424a35; }.footer-banner h2 { font-size: clamp(37px, 5vw, 66px); line-height: 1.04; letter-spacing: -.077em; margin: 11px 0; position: relative; }
+    .footer-banner p { font-size: 13px; margin: 12px 0 0; position: relative; }
+    .restart-btn { background: #141813; color: var(--lime); padding: 17px 20px; border: 0; border-radius: 12px; font-weight: 700; font-size: 13px; position: relative; }
+    .restart-btn:hover { background: #303b21; }
+    .footer { padding: 0 0 45px; display: flex; align-items: center; justify-content: space-between; gap: 20px; color: #81828f; font-size: 11px; }
+    .footer b { color: #f7f7f7; font-size: 18px; letter-spacing: -.07em; }
+    .footer .heart { color: var(--pink); }
+    #toast { position: fixed; bottom: 25px; left: 50%; transform: translate(-50%, 140px); z-index: 40; background: #eeeef2; color: #17171b; border: 1px solid #fff; border-radius: 12px; padding: 13px 18px; box-shadow: 0 20px 50px #0008; font-size: 12px; font-weight: 700; opacity: 0; pointer-events: none; transition: transform .25s, opacity .25s; }
+    #toast.show { transform: translate(-50%, 0); opacity: 1; }
+    .flash { animation: focusFlash .8s ease; }
+    @keyframes focusFlash { 30% { border-color: var(--lime); box-shadow: 0 0 0 3px #d5fc6640; } }
+    .daylight { --bg: #edece6; --surface: #fffef9; --surface2: #f7f5f0; --line: #cbcad0; --white: #20212b; --muted: #717181; color-scheme: light; }
+    .daylight .topbar { border-color: #d2d1cd; }.daylight .nav-links a { color: #555660; }.daylight .round-button { color: #292a30; background: #fff; }.daylight .online { border-color: #98a57c; color: #526726; }.daylight .online i { background: #6b9d20; }
+    .daylight .hero-desc,.daylight .section-title p { color: #676773; }.daylight .hero-foot { color: #777781; }.daylight .tiny-avatars span { border-color: var(--bg); }
+    .daylight .module { border-color: #d4d1d3; }.daylight .module-sub,.daylight .module-index { color: #757583; }.daylight .module-icon { border-color: #ceccd1; color: #6f50b5; }
+    .daylight .chip, .daylight .small-btn { color: #2a2b30; background: #f1f0ef; border-color: #cfcdd3; }.daylight .chip.active { background: #c7ee55; border-color: #c7ee55; }
+    .daylight .type-text { background: #f6f4f1; color: #252630; border-color: #c9c8ca; }.daylight .type-option label, .daylight .slider-line span, .daylight .score span { color: #676975; }.daylight .slider-line output { color: #444650; }
+    .daylight .tape { background: #e3e2dc; border-color: #c9c8c4; }.daylight .tape-content span { color: #5a5a63; }.daylight .footer { color: #686970; }.daylight .footer b { color: #24252b; }
+    .daylight .art-top, .daylight .art-bottom { color: #e6e1f0; }.daylight .sound-pad { color: #e8e7ed; }.daylight .canvas-count { color: #e0dce8; }.daylight .control-hint { color: #71717b; }
+    @media(max-width:1100px) { .hero { gap: 25px; }.hero h1 { font-size: clamp(66px, 8vw, 106px); }.wrap { width: min(100% - 54px, 1370px); }.span7,.span5 { grid-column: span 6; }.sound-pad { height: 94px; }.control-hint { width: 100%; margin: 0; } }
+    @media(max-width:790px) { .hero { grid-template-columns: 1fr; padding: 65px 0 65px; }.hero-art { height: 420px; min-height: 420px; }.hero-foot { margin-top: 32px; }.hero h1 { font-size: clamp(69px, 12vw, 120px); }.nav-links { display: none; }.section-title { padding-top: 65px; }.experiments { gap: 15px; }.span7,.span5,.span6 { grid-column: span 12; }.sound-pad { height: 100px; }.footer-banner { padding: 35px; } }
+    @media(max-width:500px) { .wrap { width: calc(100% - 28px); }.topbar { height: 76px; }.brand { font-size: 26px; }.online { padding: 9px; font-size: 9px; }.round-button { width: 37px; height: 37px; }.hero { padding-top: 50px; }.hero h1 { font-size: clamp(60px, 14.5vw, 85px); }.hero-desc { font-size: 14px; }.hero-art { min-height: 330px; height: 330px; }.art-core { transform: scale(.7) translate(var(--px,0px),var(--py,0px)); }.orbit-ring.r2 { width: 370px; height: 370px; }.art-top,.art-bottom { left: 18px; right: 18px; }.art-note { display:none; }.hero-foot { margin-top: 34px; }.section-title { display: block; }.section-title p { margin-top: 18px; }.section-title h2 { font-size: 52px; }.module-head { padding: 24px 21px 19px; }.canvas-frame { height: 260px; }.sound-pad-grid { gap: 8px; padding: 0 15px; }.sound-pad { height: 90px; padding: 10px; }.pad-note { font-size: 19px; }.pad-key { font-size: 9px; }.type-preview { font-size: 50px; }.type-options { gap: 8px; }.doodle-controls { gap: 8px; }.brush { margin-left: 0; }.footer-banner { grid-template-columns: 1fr; margin-top: 70px; padding: 27px; }.footer-banner h2 { font-size: 44px; }.restart-btn { width: max-content; }.footer { align-items: flex-start; flex-direction: column; }.reflex-scores { gap: 10px; }.score strong { font-size: 17px; } }
+    @media(prefers-reduced-motion: reduce) { *,*::before,*::after { animation-duration: .001ms!important; transition-duration: .001ms!important; scroll-behavior: auto!important; } }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <a class="brand" href="#home" aria-label="Oddly home"><span class="brand-mark">✳</span>oddly<span style="color:var(--lime)">.</span></a>
+      <nav class="nav-links" aria-label="Main navigation"><a href="#playground">The playground</a><a href="#about">The idea</a><a href="#footer">Say hello ↗</a></nav>
+      <div class="header-right"><span class="online mono"><i></i> 100% PLAYABLE</span><button class="round-button" id="themeToggle" type="button" title="Toggle light or dark mode" aria-label="Toggle light or dark mode">☼</button></div>
+    </div>
+  </header>
+  <main id="home">
+    <section class="wrap hero">
+      <div class="hero-left">
+        <span class="eyebrow mono">WELCOME TO THE WEIRD SIDE OF THE WEB</span>
+        <h1><span>CLICK.</span><span>DRAG.</span><span class="special">PLAY.</span></h1>
+        <p class="hero-desc">An internet-shaped box of little surprises. No accounts, no goals, no productivity. Just wonderfully unnecessary things to mess with.</p>
+        <div class="hero-actions"><a href="#playground" class="cta">Enter the playground <span aria-hidden="true">↗</span></a><button class="plain-btn" type="button" id="surpriseBtn">✳ &nbsp; Surprise me</button></div>
+        <div class="hero-foot"><div class="tiny-avatars" aria-hidden="true"><span>☺</span><span>✿</span><span>★</span></div><span class="mono">Made for curious humans<br>and professional procrastinators</span></div>
+      </div>
+      <div class="hero-art" id="heroArt">
+        <div class="art-top"><span class="mono"><span class="art-dot"></span>LIVE FROM THE VOID</span><span class="art-num mono">01 / ∞</span></div>
+        <div class="art-note mono">psst... poke the blob ↙</div>
+        <div class="orbit-ring"></div><div class="orbit-ring r2"></div><div class="orbit-ring r3"></div>
+        <div class="satellite one"></div><div class="satellite two"></div><div class="satellite three"></div>
+        <div class="art-core" id="artCore"><button class="blob" id="blob" aria-label="Poke the floating blob to change its vibe" type="button"></button></div>
+        <div class="art-bottom"><span class="mono">CURRENT VIBE: <span id="vibeText" style="color:var(--lime)">CHAOTIC GOOD</span></span><span class="art-pill mono">✳ INTERACTIVE OBJECT</span></div>
+      </div>
+    </section>
+    <div class="tape" aria-hidden="true"><div class="tape-content mono" id="tapeContent"></div></div>
+    <section class="wrap" id="playground">
+      <div class="section-title" id="about"><div><span class="mono">✳ THE GOOD STUFF / VOL. 001</span><h2>Your new favorite<br><em>distractions.</em></h2></div><p>Six tiny experiments. Zero instructions required. Everything responds to you, so go ahead and touch stuff.</p></div>
+      <div class="experiments">
+        <article class="module span7" id="particlesModule">
+          <div class="module-head"><div><div class="module-index mono">01 <span class="line"></span> TOUCH THE UNIVERSE</div><h3>Particle garden <span aria-hidden="true">✳</span></h3><p class="module-sub">Move your pointer. Bend the stars. Make a little chaos.</p></div><span class="module-icon" aria-hidden="true">✳</span></div>
+          <div class="canvas-frame"><canvas id="particleCanvas" aria-label="Interactive particle garden. Move or drag your pointer to move particles." tabindex="0"></canvas><span class="canvas-label mono">FIELD SIMULATION / ONLINE</span><span class="canvas-count mono" id="particleCount">000 PARTICLES</span></div>
+          <div class="controls"><button class="chip active" type="button" id="attractBtn">↘ Attract</button><button class="chip" type="button" id="repelBtn">↗ Repel</button><button class="small-btn" type="button" id="burstBtn">✳ Burst</button><button class="small-btn" type="button" id="resetParticles">↺ Reset</button><span class="control-hint mono">MOVE OR TOUCH TO PLAY</span></div>
+        </article>
+        <article class="module span5" id="soundModule">
+          <div class="module-head"><div><div class="module-index mono">02 <span class="line"></span> MAKE SOME NOISE</div><h3>Pocket synth</h3><p class="module-sub">Eight notes. One very tiny music studio.</p></div><span class="module-icon" aria-hidden="true">♫</span></div>
+          <div class="sound-pad-grid" id="padGrid" aria-label="Interactive eight-note synthesizer">
+            <button type="button" class="sound-pad selected" data-note="0"><span class="pad-key mono">KEY 1</span><span class="pad-note">C4</span></button>
+            <button type="button" class="sound-pad" data-note="1"><span class="pad-key mono">KEY 2</span><span class="pad-note">D4</span></button>
+            <button type="button" class="sound-pad" data-note="2"><span class="pad-key mono">KEY 3</span><span class="pad-note">E4</span></button>
+            <button type="button" class="sound-pad selected" data-note="3"><span class="pad-key mono">KEY 4</span><span class="pad-note">F4</span></button>
+            <button type="button" class="sound-pad" data-note="4"><span class="pad-key mono">KEY 5</span><span class="pad-note">G4</span></button>
+            <button type="button" class="sound-pad selected" data-note="5"><span class="pad-key mono">KEY 6</span><span class="pad-note">A4</span></button>
+            <button type="button" class="sound-pad" data-note="6"><span class="pad-key mono">KEY 7</span><span class="pad-note">B4</span></button>
+            <button type="button" class="sound-pad selected" data-note="7"><span class="pad-key mono">KEY 8</span><span class="pad-note">C5</span></button>
+          </div>
+          <div class="sound-controls"><button class="loop-btn" type="button" id="loopBtn">▶ Start loop</button><span class="mono" id="soundStatus" style="color:#a2a2af;font-size:9px">CLICK TO PLAY / SELECT FOR LOOP</span><label class="bpm-control mono"><input aria-label="Tempo" type="range" id="bpm" min="70" max="180" value="115"><output id="bpmValue">115 BPM</output></label></div>
+        </article>
+        <article class="module span5" id="gradientModule">
+          <div class="module-head"><div><div class="module-index mono">03 <span class="line"></span> COLOR THERAPY</div><h3>Mood mixer</h3><p class="module-sub">Your next favorite gradient is two sliders away.</p></div><span class="module-icon" aria-hidden="true">◒</span></div>
+          <div class="mood-preview" id="moodPreview"><strong id="moodWord">good vibes.</strong></div>
+          <div class="mood-sliders"><label class="slider-line"><span class="mono">COLOR A</span><input type="range" id="hueA" min="0" max="360" value="283" aria-label="First color hue"><output class="mono" id="hueAValue">283°</output></label><label class="slider-line"><span class="mono">COLOR B</span><input type="range" id="hueB" min="0" max="360" value="217" aria-label="Second color hue"><output class="mono" id="hueBValue">217°</output></label></div>
+          <div class="controls mood-controls"><button class="chip active" id="randomGradient" type="button">✳ Randomize</button><button class="small-btn" id="copyGradient" type="button">⧉ Copy CSS</button><span class="control-hint mono" id="gradientCode">135° / 2 COLORS</span></div>
+        </article>
+        <article class="module span7" id="reflexModule">
+          <div class="module-head"><div><div class="module-index mono">04 <span class="line"></span> TEST YOUR HUMAN HARDWARE</div><h3>Reflex arcade</h3><p class="module-sub">Wait for green. Click fast. Brag responsibly.</p></div><span class="module-icon" aria-hidden="true">ϟ</span></div>
+          <button class="reflex-stage" id="reflexStage" type="button"><span class="reflex-emoji" id="reflexEmoji">⚡</span><span class="reflex-big" id="reflexTitle">Think you're fast?</span><span class="reflex-tiny" id="reflexHint">Click anywhere here to start a reaction-time test.</span></button>
+          <div class="reflex-scores"><div class="score"><span class="mono">LAST TIME</span><strong id="lastScore">— ms</strong></div><div class="score"><span class="mono">PERSONAL BEST</span><strong class="best" id="bestScore">— ms</strong></div><span class="mono" style="color:#8a8a97">NO CHEATING 👀</span></div>
+        </article>
+        <article class="module span7" id="typeModule">
+          <div class="module-head"><div><div class="module-index mono">05 <span class="line"></span> MAKE WORDS LOUDER</div><h3>Type playground</h3><p class="module-sub">Stretch it, tilt it, type something ridiculous.</p></div><span class="module-icon" aria-hidden="true">Aa</span></div>
+          <div class="type-stage"><span class="stage-corner mono">LIVE PREVIEW</span><span class="stage-corner right mono">✳ 100% YOU</span><div id="typePreview" class="type-preview">GO WEIRD.</div></div>
+          <div class="type-controls"><input class="type-text" id="typeInput" type="text" maxlength="28" value="GO WEIRD." aria-label="Text to preview" placeholder="Type something fun..."><div class="type-options"><div class="type-option"><label for="typeSize" class="mono">SIZE</label><input type="range" id="typeSize" min="28" max="95" value="68"></div><div class="type-option"><label for="typeTilt" class="mono">TILT</label><input type="range" id="typeTilt" min="-22" max="22" value="-5"></div><div class="type-option"><label for="typeSpacing" class="mono">SPACING</label><input type="range" id="typeSpacing" min="-12" max="12" value="-5"></div></div></div>
+          <div class="controls"><button class="chip active" type="button" id="typeShuffle">↝ Surprise text</button><span class="control-hint mono">TYPOGRAPHY WITHOUT THE RULES</span></div>
+        </article>
+        <article class="module span5" id="doodleModule">
+          <div class="module-head"><div><div class="module-index mono">06 <span class="line"></span> NO ART SKILLS NEEDED</div><h3>Doodle zone</h3><p class="module-sub">A little canvas for very important nonsense.</p></div><span class="module-icon" aria-hidden="true">✎</span></div>
+          <div class="doodle-board"><canvas id="doodleCanvas" aria-label="Drawing canvas, use pointer or touch to draw"></canvas></div>
+          <div class="doodle-controls"><button class="swatch active" style="--swatch:#242136" data-color="#242136" type="button" aria-label="Black ink" aria-pressed="true"></button><button class="swatch" style="--swatch:#af8aee" data-color="#af8aee" type="button" aria-label="Purple ink" aria-pressed="false"></button><button class="swatch" style="--swatch:#fb8e88" data-color="#fb8e88" type="button" aria-label="Pink ink" aria-pressed="false"></button><button class="swatch" style="--swatch:#6ebba5" data-color="#6ebba5" type="button" aria-label="Mint ink" aria-pressed="false"></button><label class="brush mono">SIZE <input type="range" id="brushSize" aria-label="Brush size" min="2" max="30" value="6"></label><button class="small-btn" id="clearDoodle" type="button">Clear</button><button class="small-btn" id="saveDoodle" type="button">↓ Save</button></div>
+          <div class="module-tip mono">PRO TIP: FINGER PAINTING IS ENCOURAGED</div>
+        </article>
+      </div>
+    </section>
+    <section class="wrap" id="footer"><div class="footer-banner"><div><span class="mono">★ YOU MADE IT TO THE BOTTOM</span><h2>Stay curious.<br>Keep clicking.</h2><p>There's always room for a little more play.</p></div><button type="button" class="restart-btn" id="againBtn">↗ Do it all again</button></div></section>
+  </main>
+  <footer class="wrap footer"><b>oddly<span style="color:var(--lime)">.</span></b><span>NO COOKIES. NO SCROLL TRAPS. JUST FUN.</span><span>TIME WELL WASTED: <span id="timeSpent">00:00</span> <span class="heart">♥</span></span></footer>
+  <div id="toast" role="status" aria-live="polite"></div>
+<script>
+(() => {
+  'use strict';
+  const $ = (s, root = document) => root.querySelector(s);
+  const $$ = (s, root = document) => [...root.querySelectorAll(s)];
+  const rand = (min, max) => min + Math.random() * (max - min);
+  let toastTimer;
+  const toast = (message) => {
+    const el = $('#toast'); el.textContent = message; el.classList.add('show');
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 2400);
+  };
+
+  // Navigation, theme and hero toy.
+  document.addEventListener('pointermove', e => {
+    document.body.style.setProperty('--mx', `${(e.clientX / window.innerWidth) * 100}%`);
+    document.body.style.setProperty('--my', `${(e.clientY / window.innerHeight) * 100}%`);
+  }, {passive: true});
+  const tape = ['DO NOT TAKE THIS TOO SERIOUSLY', 'CLICK EVERYTHING', 'MADE OF PIXELS & GOOD INTENTIONS', 'GET DISTRACTED', 'SILLY IS A FEATURE', 'KEEP THE INTERNET WEIRD'];
+  $('#tapeContent').innerHTML = Array.from({length: 2}, () => tape.map(x => `<span>${x}</span><b>✳</b>`).join('')).join('');
+  const themeBtn = $('#themeToggle');
+  themeBtn.addEventListener('click', () => {
+    const light = document.body.classList.toggle('daylight'); themeBtn.textContent = light ? '☾' : '☼';
+    themeBtn.setAttribute('aria-label', light ? 'Switch to dark mode' : 'Switch to light mode');
+    toast(light ? 'Let there be light ☀' : 'Back to the dark side ☾');
+  });
+  const blob = $('#blob'), core = $('#artCore'), art = $('#heroArt');
+  const vibes = [ ['CHAOTIC GOOD','#c5aafc','#8d70e8'], ['MAIN CHARACTER','#fca9a4','#f187ac'], ['COSMIC GOBLIN','#baf17d','#62ba88'], ['SOFT LAUNCH','#9acbf9','#5e8be6'], ['IN YOUR ORBIT','#ffd38f','#ef8d8d'] ];
+  let vibeIndex = 0;
+  blob.addEventListener('click', () => {
+    vibeIndex = (vibeIndex + 1) % vibes.length; const [name, light, shade] = vibes[vibeIndex];
+    $('#vibeText').textContent = name;
+    blob.style.background = `radial-gradient(circle at 26% 26%, #ffffff, ${light} 26%, ${shade} 78%)`;
+    blob.animate([{transform:'scale(1)'},{transform:'scale(.87) rotate(20deg)'},{transform:'scale(1)'}], {duration:380, easing:'ease-out'});
+  });
+  art.addEventListener('pointermove', e => {
+    if (e.pointerType === 'touch') return;
+    const r = art.getBoundingClientRect(); core.style.setProperty('--px', `${((e.clientX-r.left)/r.width-.5)*24}px`); core.style.setProperty('--py', `${((e.clientY-r.top)/r.height-.5)*24}px`);
+  });
+  art.addEventListener('pointerleave', () => { core.style.setProperty('--px','0px'); core.style.setProperty('--py','0px'); });
+  const moduleIds = ['particlesModule','soundModule','gradientModule','reflexModule','typeModule','doodleModule'];
+  $('#surpriseBtn').addEventListener('click', () => {
+    const el = document.getElementById(moduleIds[Math.floor(Math.random()*moduleIds.length)]);
+    el.scrollIntoView({behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',block:'center'});
+    el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
+  });
+  $('#againBtn').addEventListener('click', () => { window.scrollTo({top:0,behavior:'smooth'}); toast('Round two. You got this ✳'); });
+  const start = Date.now(); setInterval(() => { const s = Math.floor((Date.now() - start)/1000); $('#timeSpent').textContent = `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`; },1000);
+
+  // Particle garden: velocity, damping and pointer forces on a DPR-aware canvas.
+  const particleCanvas = $('#particleCanvas'), pctx = particleCanvas.getContext('2d');
+  const particles = []; const pointer = {x:0,y:0,active:false,down:false};
+  let pw = 0, ph = 0, particleMode = 'attract';
+  const particleColors = ['#d6ff79','#b6a0fb','#8cc9fa','#ffc1b5','#f9f3e6'];
+  function spawnParticle(x=rand(0,pw), y=rand(0,ph), energetic=false) {
+    particles.push({x,y,vx:rand(-1,1)*(energetic?5:1),vy:rand(-1,1)*(energetic?5:1),size:rand(1.3,3.7),color:particleColors[Math.floor(rand(0,particleColors.length))],life:1});
+  }
+  function seedParticles() { particles.length=0; for(let i=0;i<115;i++) spawnParticle(); $('#particleCount').textContent=`${String(particles.length).padStart(3,'0')} PARTICLES`; }
+  function resizeParticleCanvas() {
+    const r=particleCanvas.getBoundingClientRect(), dpr=Math.min(devicePixelRatio||1,2);
+    pw=r.width; ph=r.height; particleCanvas.width=Math.max(1,Math.round(pw*dpr)); particleCanvas.height=Math.max(1,Math.round(ph*dpr)); pctx.setTransform(dpr,0,0,dpr,0,0);
+    if (!particles.length) seedParticles();
+  }
+  function pMove(e) { const r=particleCanvas.getBoundingClientRect(); pointer.x=e.clientX-r.left;pointer.y=e.clientY-r.top;pointer.active=true; }
+  particleCanvas.addEventListener('pointermove', pMove);
+  particleCanvas.addEventListener('pointerenter', pMove);
+  particleCanvas.addEventListener('pointerleave', () => { pointer.active=false;pointer.down=false; });
+  particleCanvas.addEventListener('pointerdown', e => { particleCanvas.setPointerCapture(e.pointerId); pointer.down=true;pMove(e);for(let i=0;i<24;i++)spawnParticle(pointer.x+rand(-12,12),pointer.y+rand(-12,12),true); });
+  particleCanvas.addEventListener('pointerup', () => pointer.down=false);
+  particleCanvas.addEventListener('pointercancel', () => { pointer.down=false;pointer.active=false; });
+  let pFrame=0;
+  function drawParticles() {
+    if (!pw || !ph) {requestAnimationFrame(drawParticles);return;}
+    pctx.clearRect(0,0,pw,ph);
+    for(const p of particles) {
+      if(pointer.active) {
+        const dx=pointer.x-p.x, dy=pointer.y-p.y, dist2=dx*dx+dy*dy, dist=Math.sqrt(dist2);
+        if(dist>1 && dist<175) {const f=(1-dist/175)*(pointer.down?1.1:.38)*(particleMode==='repel'?-1:1);p.vx+=dx/dist*f;p.vy+=dy/dist*f;}
+      }
+      p.vx+=Math.sin(pFrame*.007+p.y*.018)*.007; p.vy+=Math.cos(pFrame*.008+p.x*.018)*.007;
+      p.vx*=.975;p.vy*=.975;p.x+=p.vx;p.y+=p.vy;
+      if(p.x<-10)p.x=pw+10;if(p.x>pw+10)p.x=-10;if(p.y<-10)p.y=ph+10;if(p.y>ph+10)p.y=-10;
+      pctx.beginPath();pctx.arc(p.x,p.y,p.size,0,Math.PI*2);pctx.fillStyle=p.color;pctx.globalAlpha=.72;pctx.fill();
+    }
+    pctx.globalAlpha=1;
+    if(pointer.active) {pctx.beginPath();pctx.arc(pointer.x,pointer.y,39,0,Math.PI*2);pctx.strokeStyle='#c7bbec45';pctx.lineWidth=1;pctx.stroke();}
+    pFrame++; requestAnimationFrame(drawParticles);
+  }
+  $('#attractBtn').addEventListener('click', () => setParticleMode('attract'));
+  $('#repelBtn').addEventListener('click', () => setParticleMode('repel'));
+  function setParticleMode(mode) {particleMode=mode;$('#attractBtn').classList.toggle('active',mode==='attract');$('#repelBtn').classList.toggle('active',mode==='repel');}
+  $('#burstBtn').addEventListener('click', () => { for(let i=0;i<85;i++)spawnParticle(pw/2+rand(-20,20),ph/2+rand(-20,20),true);if(particles.length>350)particles.splice(0,particles.length-350);$('#particleCount').textContent=`${String(particles.length).padStart(3,'0')} PARTICLES`;toast('A tiny big bang ✳'); });
+  $('#resetParticles').addEventListener('click', () => {seedParticles();toast('Fresh universe, who dis?');});
+  resizeParticleCanvas(); new ResizeObserver(resizeParticleCanvas).observe(particleCanvas); requestAnimationFrame(drawParticles);
+
+  // Web Audio pocket synth, triggered only after user interaction.
+  const frequencies = [261.63,293.66,329.63,349.23,392,440,493.88,523.25];
+  const pads = $$('.sound-pad'); const selected = new Set([0,3,5,7]);
+  let audioContext=null, looping=false, loopTimer=null, step=0;
+  function getAudio() {const C=window.AudioContext||window.webkitAudioContext;if(!C){toast('Audio is not supported in this browser');return null;}if(!audioContext)audioContext=new C();if(audioContext.state==='suspended')audioContext.resume();return audioContext;}
+  function soundNote(index) {
+    const a=getAudio();if(!a)return;
+    const now=a.currentTime, osc=a.createOscillator(), gain=a.createGain(), soft=a.createBiquadFilter();
+    osc.type='triangle';osc.frequency.setValueAtTime(frequencies[index],now);
+    soft.type='lowpass';soft.frequency.setValueAtTime(1600,now);
+    gain.gain.setValueAtTime(.0001,now);gain.gain.exponentialRampToValueAtTime(.18,now+.015);gain.gain.exponentialRampToValueAtTime(.0001,now+.52);
+    osc.connect(soft);soft.connect(gain);gain.connect(a.destination);osc.start(now);osc.stop(now+.55);
+    pads[index].classList.add('playing');setTimeout(()=>pads[index].classList.remove('playing'),180);
+  }
+  pads.forEach((pad, i) => pad.addEventListener('click', () => {soundNote(i);if(selected.has(i))selected.delete(i);else selected.add(i);pad.classList.toggle('selected',selected.has(i));}));
+  document.addEventListener('keydown', e => {if(e.altKey||e.ctrlKey||e.metaKey||e.repeat||['INPUT','TEXTAREA'].includes(document.activeElement.tagName))return;const i=Number(e.key)-1;if(i>=0&&i<8){soundNote(i);pads[i].animate([{transform:'scale(.96)'},{transform:'scale(1)'}],{duration:150});}});
+  function scheduleLoop() {clearInterval(loopTimer);if(!looping)return;const tick=()=>{if(selected.has(step))soundNote(step);step=(step+1)%8;};tick();loopTimer=setInterval(tick,60000/Number($('#bpm').value)/2);}
+  $('#loopBtn').addEventListener('click', () => {if(!looping&&!getAudio())return;looping=!looping;step=0;$('#loopBtn').textContent=looping?'■ Stop loop':'▶ Start loop';$('#loopBtn').classList.toggle('is-playing',looping);$('#soundStatus').textContent=looping?'PLAYING YOUR PATTERN':'CLICK TO PLAY / SELECT FOR LOOP';scheduleLoop();});
+  $('#bpm').addEventListener('input',e=>{$('#bpmValue').textContent=`${e.target.value} BPM`;if(looping)scheduleLoop();});
+  document.addEventListener('visibilitychange',()=>{if(document.hidden&&looping){looping=false;clearInterval(loopTimer);$('#loopBtn').textContent='▶ Start loop';$('#loopBtn').classList.remove('is-playing');$('#soundStatus').textContent='PAUSED / CLICK TO RESTART';}});
+
+  // Gradient mixer with one-click CSS export.
+  let gradientCss='';
+  function updateGradient() {
+    const a=Number($('#hueA').value),b=Number($('#hueB').value);
+    $('#hueAValue').textContent=`${a}°`;$('#hueBValue').textContent=`${b}°`;
+    gradientCss=`linear-gradient(135deg, hsl(${a}, 75%, 79%), hsl(${b}, 88%, 74%))`;
+    $('#moodPreview').style.background=gradientCss;$('#gradientCode').textContent=`135° / HUE ${a} + ${b}`;
+  }
+  $('#hueA').addEventListener('input',updateGradient);$('#hueB').addEventListener('input',updateGradient);
+  const moodWords=['good vibes.','stay dreamy.','color me happy.','oh, hello.','more magic.','yes, please.'];
+  $('#randomGradient').addEventListener('click',()=>{$('#hueA').value=Math.round(rand(0,360));$('#hueB').value=Math.round(rand(0,360));$('#moodWord').textContent=moodWords[Math.floor(rand(0,moodWords.length))];updateGradient();});
+  $('#copyGradient').addEventListener('click',async()=>{const value=`background: ${gradientCss};`;try{if(navigator.clipboard&&window.isSecureContext)await navigator.clipboard.writeText(value);else{const ta=document.createElement('textarea');ta.value=value;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();if(!document.execCommand('copy'))throw Error('copy failed');ta.remove();}toast('CSS copied to clipboard ✓');}catch{toast('Copy not available — try HTTPS or localhost');}});
+  updateGradient();
+
+  // Reflex game: random wait, early-click penalty, best saved locally when possible.
+  const reflex=$('#reflexStage'); let reflexState='idle', reflexTimeout=null, goTime=0, best=null;
+  try{const n=Number(localStorage.getItem('oddly-reflex-best'));if(n>0&&Number.isFinite(n)){best=n;$('#bestScore').textContent=`${n} ms`;}}catch{}
+  function reflexView(state, emoji, title, hint){reflex.className=`reflex-stage ${state}`;$('#reflexEmoji').textContent=emoji;$('#reflexTitle').textContent=title;$('#reflexHint').textContent=hint;}
+  reflex.addEventListener('click',()=>{
+    if(reflexState==='waiting'){clearTimeout(reflexTimeout);reflexState='early';reflexView('too-soon','🙈','Too soon!','You jumped the gun. Click to retry.');return;}
+    if(reflexState==='now'){
+      const elapsed=Math.round(performance.now()-goTime);reflexState='finished';$('#lastScore').textContent=`${elapsed} ms`;
+      if(best===null||elapsed<best){best=elapsed;$('#bestScore').textContent=`${best} ms`;try{localStorage.setItem('oddly-reflex-best',String(best));}catch{}toast('New personal best! ⚡');}
+      reflexView('finished',elapsed<230?'⚡':'🎯',`${elapsed} milliseconds`,elapsed<200?'Superhuman fingers. Suspicious.':elapsed<300?'Pretty speedy! Click to go again.':'Click to try for a faster time.');return;
+    }
+    reflexState='waiting';reflexView('waiting','⏳','Wait for green...','Not yet. Not yet. NOT YET.');
+    clearTimeout(reflexTimeout);reflexTimeout=setTimeout(()=>{reflexState='now';goTime=performance.now();reflexView('now','⚡','CLICK NOW!','GO GO GO!');},rand(1100,3600));
+  });
+
+  // Expressive type controls.
+  const typePhrases=['GO WEIRD.','HELLO, WORLD!','BIG MOOD.','MAKE WAVES.','STAY SILLY.','WHY NOT?','OH WOW.','BE CURIOUS.'];
+  function updateType(){const text=$('#typeInput').value||'YOUR TEXT';const size=Number($('#typeSize').value),tilt=Number($('#typeTilt').value),spacing=Number($('#typeSpacing').value);const p=$('#typePreview');p.textContent=text;p.style.fontSize=`clamp(24px, ${size/6}vw, ${size}px)`;p.style.transform=`rotate(${tilt}deg)`;p.style.letterSpacing=`${spacing/100}em`;}
+  ['typeInput','typeSize','typeTilt','typeSpacing'].forEach(id=>document.getElementById(id).addEventListener('input',updateType));
+  $('#typeShuffle').addEventListener('click',()=>{$('#typeInput').value=typePhrases[Math.floor(rand(0,typePhrases.length))];$('#typeTilt').value=Math.round(rand(-15,15));$('#typeSize').value=Math.round(rand(45,85));$('#typeSpacing').value=Math.round(rand(-9,3));updateType();});
+  updateType();
+
+  // Doodle pad keeps an exportable high-resolution backing canvas.
+  const doodle=$('#doodleCanvas'), dctx=doodle.getContext('2d');
+  doodle.width=1000;doodle.height=600;
+  let brushColor='#242136',brushWidth=6,drawing=false,lastPoint=null;
+  function clearSketch(){dctx.fillStyle='#fbf9ee';dctx.fillRect(0,0,doodle.width,doodle.height);}
+  clearSketch();
+  function doodlePoint(e){const rect=doodle.getBoundingClientRect();return {x:(e.clientX-rect.left)*doodle.width/rect.width,y:(e.clientY-rect.top)*doodle.height/rect.height};}
+  function lineDoodle(a,b){dctx.strokeStyle=brushColor;dctx.fillStyle=brushColor;dctx.lineWidth=brushWidth*2;dctx.lineCap='round';dctx.lineJoin='round';dctx.beginPath();dctx.moveTo(a.x,a.y);dctx.lineTo(b.x,b.y);dctx.stroke();}
+  doodle.addEventListener('pointerdown',e=>{if(e.button!==0&&e.pointerType==='mouse')return;drawing=true;doodle.setPointerCapture(e.pointerId);lastPoint=doodlePoint(e);lineDoodle(lastPoint,lastPoint);});
+  doodle.addEventListener('pointermove',e=>{if(!drawing)return;const p=doodlePoint(e);lineDoodle(lastPoint,p);lastPoint=p;});
+  ['pointerup','pointercancel','lostpointercapture'].forEach(event=>doodle.addEventListener(event,()=>{drawing=false;lastPoint=null;}));
+  $$('.swatch').forEach(btn=>btn.addEventListener('click',()=>{brushColor=btn.dataset.color;$$('.swatch').forEach(s=>{const is=s===btn;s.classList.toggle('active',is);s.setAttribute('aria-pressed',String(is));});}));
+  $('#brushSize').addEventListener('input',e=>brushWidth=Number(e.target.value));
+  $('#clearDoodle').addEventListener('click',()=>{clearSketch();toast('Blank canvas. Infinite possibilities.');});
+  $('#saveDoodle').addEventListener('click',()=>{const a=document.createElement('a');a.download='my-oddly-masterpiece.png';a.href=doodle.toDataURL('image/png');document.body.appendChild(a);a.click();a.remove();toast('Masterpiece saved ✳');});
+})();
+</script>
+</body>
+</html>
