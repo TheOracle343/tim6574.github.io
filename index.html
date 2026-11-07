@@ -1,1376 +1,619 @@
-<!DOCTYPE html>
-<html lang="en" class="dark">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PodCastaway - Downloader & Player</title>
+import time
+import random
+import math
+import gc
+import board
+import busio
+import displayio
+import fourwire
+import analogio
+import digitalio
+import terminalio
+import supervisor
+import vectorio
+from adafruit_display_text import label
+from circuitpython_st7796s import ST7796S
+
+# ==========================================
+# HARDWARE SETUP
+# ==========================================
+displayio.release_displays()
+spi = busio.SPI(clock=board.GP2, MOSI=board.GP3)
+while not spi.try_lock():
+    pass
+spi.configure(baudrate=60000000)
+spi.unlock()
+
+display_bus = fourwire.FourWire(spi, command=board.GP5, chip_select=board.GP1, reset=board.GP6, baudrate=60000000)
+display = ST7796S(display_bus, width=480, height=320, rotation=0)
+display.auto_refresh = False
+
+def main():
+    root = displayio.Group(scale=2)
+    LOGICAL_W = 240
+    LOGICAL_H = 160
+    MAP_W = 480  
+
+    world_group = displayio.Group()
+    ui_group = displayio.Group()
     
-    <!-- Tailwind CSS with Config -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {
-                    colors: {
-                        slate: {
-                            750: '#2d3748', // Custom dark shade
-                        }
-                    },
-                    animation: {
-                        'fade-in': 'fadeIn 0.5s ease-out forwards',
-                        'bounce-short': 'bounceShort 0.5s ease-in-out 2',
-                    },
-                    keyframes: {
-                        fadeIn: {
-                            '0%': { opacity: '0', transform: 'translateY(10px)' },
-                            '100%': { opacity: '1', transform: 'translateY(0)' },
-                        },
-                        bounceShort: {
-                            '0%, 100%': { transform: 'translateY(0)' },
-                            '50%': { transform: 'translateY(-25%)' },
-                        }
-                    }
-                }
-            }
-        }
-    </script>
+    root.append(world_group)
+    root.append(ui_group)
+
+    # ==========================================
+    # PALETTES
+    # ==========================================
+    terrain_pal = displayio.Palette(2)
+    terrain_pal[0] = 0x4488FF 
+    terrain_pal[1] = 0x228B22 
+
+    tank_pal = displayio.Palette(1)
+    tank_pal[0] = 0xCCCCCC 
     
-    <!-- Lucide Icons -->
-    <script src="https://unpkg.com/lucide@latest"></script>
+    enemy_pal = displayio.Palette(1)
+    enemy_pal[0] = 0xFF2222 
 
-    <!-- Google Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    ui_pal = displayio.Palette(1)
+    ui_pal[0] = 0xFFFFFF 
+    
+    exp_pal = displayio.Palette(1)
+    exp_pal[0] = 0xFF8800 
 
-    <style>
-        /* CSS Variables for Dynamic Scrollbars */
-        :root {
-            --sb-track: #f1f5f9;
-            --sb-thumb: #cbd5e1;
-            --sb-thumb-hover: #94a3b8;
-        }
-        .dark {
-            --sb-track: #0f172a;
-            --sb-thumb: #334155;
-            --sb-thumb-hover: #475569;
-        }
+    hp_green_pal = displayio.Palette(1)
+    hp_green_pal[0] = 0x00FF00
+    
+    energy_blue_pal = displayio.Palette(1)
+    energy_blue_pal[0] = 0x00AAFF
 
-        body {
-            font-family: 'Inter', sans-serif;
-        }
+    # ==========================================
+    # SCENE GRAPH (WORLD)
+    # ==========================================
+    terrain_bmp = displayio.Bitmap(MAP_W, LOGICAL_H, 2)
+    terrain_grid = displayio.TileGrid(terrain_bmp, pixel_shader=terrain_pal)
+    world_group.append(terrain_grid)
 
-        /* Custom Scrollbar */
-        ::-webkit-scrollbar {
-            width: 8px;
-            height: 8px;
-        }
-        ::-webkit-scrollbar-track {
-            background: var(--sb-track);
-        }
-        ::-webkit-scrollbar-thumb {
-            background: var(--sb-thumb);
-            border-radius: 4px;
-        }
-        ::-webkit-scrollbar-thumb:hover {
-            background: var(--sb-thumb-hover);
-        }
+    TANK_W = 10
+    TANK_H = 6
+    BARREL_LENGTH = 24  # Doubled from 12 to 24
+    
+    p1_body = vectorio.Rectangle(pixel_shader=tank_pal, width=TANK_W, height=TANK_H, x=0, y=0)
+    p1_barrel = vectorio.Polygon(pixel_shader=tank_pal, points=[(0,0), (0,0), (0,0)])
+    
+    p2_body = vectorio.Rectangle(pixel_shader=enemy_pal, width=TANK_W, height=TANK_H, x=0, y=0)
+    p2_barrel = vectorio.Polygon(pixel_shader=enemy_pal, points=[(0,0), (0,0), (0,0)])
 
-        /* Loader Animation */
-        .loader {
-            border: 3px solid rgba(255,255,255,0.1);
-            border-radius: 50%;
-            border-top: 3px solid #3b82f6;
-            width: 24px;
-            height: 24px;
-            animation: spin 1s linear infinite;
-        }
-        .dark .loader {
-             border: 3px solid rgba(255,255,255,0.1);
-             border-top: 3px solid #3b82f6;
-        }
-        html:not(.dark) .loader {
-            border: 3px solid rgba(0,0,0,0.1);
-            border-top: 3px solid #2563eb;
-        }
+    world_group.append(p1_body)
+    world_group.append(p1_barrel)
+    world_group.append(p2_body)
+    world_group.append(p2_barrel)
 
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
+    shell = vectorio.Rectangle(pixel_shader=ui_pal, width=2, height=2, x=-10, y=-10)
+    world_group.append(shell)
 
-        /* Progress Bar for Audio */
-        input[type=range] {
-            -webkit-appearance: none;
-            background: transparent;
-        }
-        input[type=range]::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            height: 12px;
-            width: 12px;
-            border-radius: 50%;
-            background: #3b82f6;
-            cursor: pointer;
-            margin-top: -5px; 
-        }
-        input[type=range]::-webkit-slider-runnable-track {
-            width: 100%;
-            height: 4px;
-            cursor: pointer;
-            background: #cbd5e1; 
-            border-radius: 2px;
-        }
-        .dark input[type=range]::-webkit-slider-runnable-track {
-            background: #334155; 
-        }
-    </style>
-</head>
-<body class="h-screen flex flex-col overflow-hidden bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-e2e8f0 transition-colors duration-300">
+    exp_radius = 16
+    exp_points = []
+    for i in range(12):
+        angle = (i / 12) * math.pi * 2
+        exp_points.append((int(math.cos(angle)*exp_radius), int(math.sin(angle)*exp_radius)))
+    explosion = vectorio.Polygon(pixel_shader=exp_pal, points=exp_points, x=-50, y=-50)
+    world_group.append(explosion)
 
-    <!-- Header -->
-    <header class="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 p-4 flex items-center justify-between shrink-0 z-20 shadow-sm dark:shadow-lg transition-colors duration-300">
-        <div class="flex items-center gap-2 cursor-pointer" onclick="goHome()">
-            <div class="bg-blue-600 p-2 rounded-lg shadow-md">
-                <i data-lucide="headphones" class="w-6 h-6 text-white"></i>
-            </div>
-            <h1 class="text-xl font-bold text-slate-900 dark:text-white tracking-tight hidden sm:block">PodCastaway</h1>
-        </div>
+    # ==========================================
+    # SCENE GRAPH (UI)
+    # ==========================================
+    power_bar = vectorio.Rectangle(pixel_shader=ui_pal, width=1, height=4, x=96, y=-10)
+    ui_group.append(power_bar)
+    
+    p1_hp_bar = vectorio.Rectangle(pixel_shader=hp_green_pal, width=50, height=4, x=5, y=5)
+    p2_hp_bar = vectorio.Rectangle(pixel_shader=enemy_pal, width=50, height=4, x=LOGICAL_W-55, y=5)
+    p1_en_bar = vectorio.Rectangle(pixel_shader=energy_blue_pal, width=50, height=3, x=5, y=11)
+    p2_en_bar = vectorio.Rectangle(pixel_shader=energy_blue_pal, width=50, height=3, x=LOGICAL_W-55, y=11)
+    
+    ui_group.append(p1_hp_bar)
+    ui_group.append(p2_hp_bar)
+    ui_group.append(p1_en_bar)
+    ui_group.append(p2_en_bar)
 
-        <div class="flex-1 max-w-xl mx-4 relative">
-            <input 
-                type="text" 
-                id="searchInput" 
-                placeholder="Search podcasts..." 
-                class="w-full bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-full py-2 pl-10 pr-4 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all placeholder-slate-500 dark:placeholder-slate-400"
-                onkeypress="handleEnter(event)"
-            >
-            <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3.5 top-3"></i>
-        </div>
+    score_label = label.Label(terminalio.FONT, text="SCORE: 0", color=0xFFFFFF, x=90, y=10)
+    status_label = label.Label(terminalio.FONT, text="SCORCHED PICO", color=0xFFFF00, x=70, y=25)
+    ui_group.append(score_label)
+    ui_group.append(status_label)
 
-        <div class="flex items-center gap-2">
-            <!-- Notifications Bell -->
-            <button onclick="toggleNotificationsMenu()" class="relative p-2 text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-white transition-colors rounded-full hover:bg-slate-100 dark:hover:bg-slate-800" title="Notifications">
-                <i id="notifIcon" data-lucide="bell" class="w-6 h-6"></i>
-                <span id="notifBadge" class="hidden absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white dark:border-slate-900"></span>
-            </button>
+    display.root_group = root
 
-            <!-- Theme Toggle -->
-            <button onclick="toggleTheme()" class="p-2 text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-white transition-colors rounded-full hover:bg-slate-100 dark:hover:bg-slate-800" title="Toggle Theme">
-                <i id="themeIcon" data-lucide="moon" class="w-6 h-6"></i>
-            </button>
-            
-            <button onclick="goHome()" class="text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-white transition-colors p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800">
-                <i data-lucide="home" class="w-6 h-6"></i>
-            </button>
-        </div>
-    </header>
+    # ==========================================
+    # CONTROLS
+    # ==========================================
+    joy_x = analogio.AnalogIn(board.GP26)
+    pot = analogio.AnalogIn(board.GP28)
+    
+    blue_btn = digitalio.DigitalInOut(board.GP14)
+    blue_btn.direction = digitalio.Direction.INPUT
+    blue_btn.pull = digitalio.Pull.UP
+    
+    red_btn = digitalio.DigitalInOut(board.GP15)
+    red_btn.direction = digitalio.Direction.INPUT
+    red_btn.pull = digitalio.Pull.UP
 
-    <!-- Main Content Area -->
-    <main id="mainContent" class="flex-1 overflow-y-auto p-4 sm:p-6 pb-32 relative bg-slate-50 dark:bg-slate-900 transition-colors duration-300">
+    yellow_btn = digitalio.DigitalInOut(board.GP13)
+    yellow_btn.direction = digitalio.Direction.INPUT
+    yellow_btn.pull = digitalio.Pull.UP
+
+    joy_btn = digitalio.DigitalInOut(board.GP16)
+    joy_btn.direction = digitalio.Direction.INPUT
+    joy_btn.pull = digitalio.Pull.UP
+
+    sum_x = 0
+    for _ in range(10): sum_x += joy_x.value
+    CENTER_X = sum_x // 10
+
+    # ==========================================
+    # LOGIC FUNCTIONS
+    # ==========================================
+    def generate_terrain():
+        for x in range(MAP_W):
+            for y in range(LOGICAL_H):
+                terrain_bmp[x, y] = 0
+                
+        offset1 = random.uniform(20.0, 50.0)
+        offset2 = random.uniform(30.0, 70.0)
+        base_h = random.randint(80, 120)
         
-        <!-- Welcome / Home State -->
-        <div id="welcomeState" class="flex flex-col items-center justify-start min-h-full text-center space-y-10 animate-fade-in py-10 pb-20">
-            
-            <!-- Hero Section -->
-            <div class="space-y-4 max-w-2xl px-4">
-                <div class="bg-white dark:bg-slate-800 p-6 rounded-full mb-4 inline-block shadow-xl dark:shadow-blue-900/20 border border-slate-200 dark:border-slate-700 transition-colors duration-300">
-                    <i data-lucide="radio" class="w-16 h-16 text-blue-600 dark:text-blue-500"></i>
-                </div>
-                <h2 class="text-4xl font-bold text-slate-900 dark:text-white tracking-tight">Discover & Download</h2>
-                <p class="text-slate-500 dark:text-slate-400 text-lg">Stream your favorite stories or download episodes for the road.</p>
-            </div>
+        for x in range(MAP_W):
+            h = base_h + int(math.sin(x/offset1)*20 + math.cos(x/offset2)*30)
+            if h < 40: h = 40
+            if h > 150: h = 150
+            for y in range(h, LOGICAL_H):
+                terrain_bmp[x, y] = 1
 
-            <!-- Recommended For You (Replaces Liked Shelf) -->
-            <div id="recommendedContainer" class="w-full max-w-5xl px-4 hidden">
-                <div class="flex items-center gap-2 mb-4">
-                    <i data-lucide="sparkles" class="w-4 h-4 text-yellow-500"></i>
-                    <h3 class="text-slate-400 dark:text-slate-500 text-xs font-bold uppercase tracking-widest text-left">Recommended for You</h3>
-                </div>
-                <div id="recommendedList" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                    <!-- Populated by JS -->
-                </div>
-            </div>
+    def settle_tank(tx, ty):
+        while ty < LOGICAL_H - TANK_H:
+            if terrain_bmp[int(tx + TANK_W/2), int(ty + TANK_H)] == 1:
+                break
+            ty += 1
+        return ty
 
-            <!-- Following Section -->
-            <div id="favoritesContainer" class="w-full max-w-5xl px-4 hidden">
-                <h3 class="text-slate-400 dark:text-slate-500 text-xs font-bold uppercase tracking-widest mb-4 text-left">Following</h3>
-                <div id="favoritesList" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                    <!-- Populated by JS -->
-                </div>
-            </div>
+    def carve_crater(cx, cy, r):
+        for dx in range(-r, r+1):
+            for dy in range(-r, r+1):
+                if dx*dx + dy*dy <= r*r:
+                    nx, ny = int(cx + dx), int(cy + dy)
+                    if 0 <= nx < MAP_W and 0 <= ny < LOGICAL_H:
+                        terrain_bmp[nx, ny] = 0
 
-            <!-- Recent Searches -->
-            <div id="recentSearchesContainer" class="w-full max-w-3xl px-4 hidden">
-                <div class="flex items-center justify-between mb-3 px-1">
-                    <h3 class="text-slate-400 dark:text-slate-500 text-xs font-bold uppercase tracking-widest">Recent Searches</h3>
-                    <button onclick="clearRecentSearches()" class="text-[10px] text-slate-400 hover:text-red-500 dark:hover:text-red-400 transition">Clear All</button>
-                </div>
-                <div id="recentSearchesList" class="flex flex-wrap gap-2 justify-center sm:justify-start">
-                    <!-- Populated by JS -->
-                </div>
-            </div>
+    def get_barrel_pts(angle, length=24):
+        cx, cy = TANK_W // 2, -2
+        ex, ey = cx + int(math.cos(angle) * length), cy - int(math.sin(angle) * length)
+        # Doubled barrel thickness width (-2 to +2 instead of -1 to +1)
+        return [(cx, cy - 2), (ex, ey), (cx, cy + 2)]
 
-            <!-- Curated Collections -->
-            <div class="w-full max-w-4xl px-4">
-                <h3 class="text-slate-400 dark:text-slate-500 text-xs font-bold uppercase tracking-widest mb-4 text-left">Curated Collections</h3>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <!-- Educational -->
-                    <button onclick="searchCategory('Educational Podcasts')" class="relative overflow-hidden h-32 rounded-xl group text-left border border-transparent hover:border-blue-500/50 transition-all">
-                        <div class="absolute inset-0 bg-gradient-to-br from-blue-500 to-indigo-600 opacity-90 group-hover:opacity-100 transition-opacity"></div>
-                        <div class="relative z-10 p-5 h-full flex flex-col justify-between">
-                            <i data-lucide="brain-circuit" class="w-8 h-8 text-white opacity-80"></i>
-                            <div>
-                                <h4 class="text-white font-bold text-lg">Brain Food</h4>
-                                <p class="text-blue-100 text-xs">Learn something new</p>
-                            </div>
-                        </div>
-                    </button>
-                    <!-- Sleep -->
-                    <button onclick="searchCategory('Meditation Sleep')" class="relative overflow-hidden h-32 rounded-xl group text-left border border-transparent hover:border-teal-500/50 transition-all">
-                        <div class="absolute inset-0 bg-gradient-to-br from-teal-500 to-emerald-600 opacity-90 group-hover:opacity-100 transition-opacity"></div>
-                        <div class="relative z-10 p-5 h-full flex flex-col justify-between">
-                            <i data-lucide="moon" class="w-8 h-8 text-white opacity-80"></i>
-                            <div>
-                                <h4 class="text-white font-bold text-lg">Sleep & Relax</h4>
-                                <p class="text-teal-100 text-xs">Unwind your mind</p>
-                            </div>
-                        </div>
-                    </button>
-                    <!-- Comedy -->
-                    <button onclick="searchCategory('Comedy Interviews')" class="relative overflow-hidden h-32 rounded-xl group text-left border border-transparent hover:border-pink-500/50 transition-all">
-                        <div class="absolute inset-0 bg-gradient-to-br from-pink-500 to-rose-600 opacity-90 group-hover:opacity-100 transition-opacity"></div>
-                        <div class="relative z-10 p-5 h-full flex flex-col justify-between">
-                            <i data-lucide="laugh" class="w-8 h-8 text-white opacity-80"></i>
-                            <div>
-                                <h4 class="text-white font-bold text-lg">Laugh Out Loud</h4>
-                                <p class="text-pink-100 text-xs">Comedy gold</p>
-                            </div>
-                        </div>
-                    </button>
-                </div>
-            </div>
+    def calc_damage(tx, ty, cx, cy):
+        dist = math.sqrt((tx+TANK_W/2 - cx)**2 + (ty+TANK_H/2 - cy)**2)
+        if dist < exp_radius + TANK_W:
+            return int((exp_radius + TANK_W - dist) * 2.0)
+        return 0
 
-            <!-- Browse Categories (Expanded) -->
-            <div class="w-full max-w-4xl px-4">
-                <h3 class="text-slate-400 dark:text-slate-500 text-xs font-bold uppercase tracking-widest mb-4 text-left">Browse by Category</h3>
-                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <button onclick="searchCategory('News')" class="p-4 bg-white dark:bg-slate-800/50 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-blue-400 dark:hover:border-blue-500/50 rounded-xl transition-all group shadow-sm hover:shadow-md">
-                        <i data-lucide="newspaper" class="w-6 h-6 text-red-500 dark:text-red-400 mx-auto mb-2 group-hover:scale-110 transition-transform"></i>
-                        <span class="text-sm font-medium text-slate-700 dark:text-slate-200">News</span>
-                    </button>
-                    <button onclick="searchCategory('Sports')" class="p-4 bg-white dark:bg-slate-800/50 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-blue-400 dark:hover:border-blue-500/50 rounded-xl transition-all group shadow-sm hover:shadow-md">
-                        <i data-lucide="trophy" class="w-6 h-6 text-orange-500 dark:text-orange-400 mx-auto mb-2 group-hover:scale-110 transition-transform"></i>
-                        <span class="text-sm font-medium text-slate-700 dark:text-slate-200">Sports</span>
-                    </button>
-                    <button onclick="searchCategory('Technology')" class="p-4 bg-white dark:bg-slate-800/50 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-blue-400 dark:hover:border-blue-500/50 rounded-xl transition-all group shadow-sm hover:shadow-md">
-                        <i data-lucide="cpu" class="w-6 h-6 text-cyan-600 dark:text-cyan-400 mx-auto mb-2 group-hover:scale-110 transition-transform"></i>
-                        <span class="text-sm font-medium text-slate-700 dark:text-slate-200">Technology</span>
-                    </button>
-                    <button onclick="searchCategory('History')" class="p-4 bg-white dark:bg-slate-800/50 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-blue-400 dark:hover:border-blue-500/50 rounded-xl transition-all group shadow-sm hover:shadow-md">
-                        <i data-lucide="hourglass" class="w-6 h-6 text-amber-600 dark:text-amber-400 mx-auto mb-2 group-hover:scale-110 transition-transform"></i>
-                        <span class="text-sm font-medium text-slate-700 dark:text-slate-200">History</span>
-                    </button>
-                </div>
-            </div>
-        </div>
+    # ==========================================
+    # VIEW SYSTEM
+    # ==========================================
+    VIEW_ZOOMED_P1 = 0
+    VIEW_ZOOMED_P2 = 1
+    VIEW_FULL_MAP = 2
+    current_view = -1
 
-        <!-- Search Results Grid -->
-        <div id="searchResults" class="hidden grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 sm:gap-6">
-            <!-- Cards injected via JS -->
-        </div>
-
-        <!-- Podcast Detail View -->
-        <div id="podcastDetail" class="hidden max-w-5xl mx-auto">
-            <!-- Header injected via JS -->
-            <div id="detailHeader" class="flex flex-col md:flex-row gap-6 mb-8 items-start"></div>
-
-            <!-- Similar Podcasts -->
-            <div id="similarContainer" class="hidden mb-8">
-                <h3 class="text-slate-400 dark:text-slate-500 text-xs font-bold uppercase tracking-widest mb-3">You Might Also Like</h3>
-                <div id="similarList" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4"></div>
-            </div>
-            
-            <!-- Episodes List -->
-            <div class="bg-white/50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700/50 overflow-hidden shadow-sm transition-colors duration-300">
-                <div class="p-4 border-b border-slate-200 dark:border-slate-700/50 flex justify-between items-center bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm sticky top-0 z-10">
-                    <h3 class="font-semibold text-lg text-slate-900 dark:text-white">Episodes</h3>
-                    <span id="episodeCount" class="text-xs font-mono bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 px-2 py-1 rounded">0</span>
-                </div>
-                <div id="episodesList" class="divide-y divide-slate-200 dark:divide-slate-700/50"></div>
-            </div>
-        </div>
-
-        <!-- Notification Center (Modal Overlay) -->
-        <div id="notifModal" class="hidden fixed inset-0 z-50 flex justify-end">
-            <!-- Backdrop -->
-            <div onclick="toggleNotificationsMenu()" class="absolute inset-0 bg-black/50 backdrop-blur-sm transition-opacity"></div>
-            
-            <!-- Panel -->
-            <div class="relative w-full max-w-md bg-white dark:bg-slate-900 h-full shadow-2xl flex flex-col animate-fade-in border-l border-slate-200 dark:border-slate-800">
-                <div class="p-4 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-800">
-                    <h3 class="font-bold text-lg text-slate-900 dark:text-white flex items-center gap-2">
-                        <i data-lucide="bell" class="w-5 h-5"></i> Notifications
-                    </h3>
-                    <button onclick="toggleNotificationsMenu()" class="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full transition">
-                        <i data-lucide="x" class="w-5 h-5"></i>
-                    </button>
-                </div>
-                
-                <div class="p-4 bg-blue-50 dark:bg-blue-900/10 border-b border-blue-100 dark:border-blue-800/30">
-                    <button onclick="checkForNewEpisodes()" id="checkUpdateBtn" class="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition flex items-center justify-center gap-2 shadow-sm">
-                        <i data-lucide="refresh-cw" class="w-4 h-4"></i> Check for New Episodes
-                    </button>
-                </div>
-
-                <div id="notifList" class="flex-1 overflow-y-auto p-4 space-y-3">
-                    <div class="text-center text-slate-500 dark:text-slate-400 py-10">
-                        <p>No new notifications.</p>
-                        <p class="text-xs mt-2 opacity-70">Follow podcasts to see updates here.</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Loader -->
-        <div id="globalLoader" class="hidden fixed inset-0 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center flex-col gap-4">
-            <div class="loader"></div>
-            <p class="text-slate-600 dark:text-slate-400 text-sm font-medium animate-pulse">Fetching feed...</p>
-        </div>
-
-    </main>
-
-    <!-- Audio Player Footer -->
-    <footer id="playerFooter" class="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 p-3 sm:p-4 fixed bottom-0 w-full z-30 transition-transform transform translate-y-full shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] dark:shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.3)] duration-300">
-        <button onclick="closePlayer()" class="absolute -top-3 right-4 bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700 rounded-full p-1.5 hover:text-red-500 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700 shadow-md z-50 transform hover:scale-110 transition-all" title="Close Player">
-            <i data-lucide="x" class="w-4 h-4"></i>
-        </button>
-
-        <div class="max-w-7xl mx-auto flex items-center gap-4">
-            <div class="hidden sm:flex items-center gap-3 w-1/4 min-w-[150px]">
-                <img id="playerImg" src="" class="w-12 h-12 rounded bg-slate-200 dark:bg-slate-800 object-cover hidden">
-                <div class="overflow-hidden">
-                    <h4 id="playerTitle" class="text-sm font-semibold text-slate-900 dark:text-white truncate">Select an episode</h4>
-                    <p id="playerSub" class="text-xs text-slate-500 dark:text-slate-400 truncate">No Podcast Selected</p>
-                </div>
-            </div>
-
-            <div class="flex-1 flex flex-col items-center max-w-2xl mx-auto w-full">
-                <div class="flex items-center gap-6 mb-1">
-                    <button onclick="skip(-15)" class="text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-white transition"><i data-lucide="rotate-ccw" class="w-5 h-5"></i></button>
-                    <button id="playPauseBtn" onclick="togglePlay()" class="bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-full p-2 hover:bg-blue-600 dark:hover:bg-blue-50 transition transform hover:scale-105 shadow-md">
-                        <i data-lucide="play" class="w-6 h-6 fill-current"></i>
-                    </button>
-                    <button onclick="skip(30)" class="text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-white transition"><i data-lucide="rotate-cw" class="w-5 h-5"></i></button>
-                </div>
-                <div class="w-full flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400 font-mono">
-                    <span id="currTime">0:00</span>
-                    <input type="range" id="seekSlider" value="0" max="100" class="flex-1 h-1 rounded-lg appearance-none cursor-pointer" oninput="seekAudio()">
-                    <span id="durTime">0:00</span>
-                </div>
-            </div>
-
-            <div class="hidden md:flex items-center justify-end gap-3 w-1/4">
-                <button id="speedBtn" onclick="toggleSpeed()" class="text-xs font-bold text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-white px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700 transition">1x</button>
-                <button id="sleepBtn" onclick="toggleSleepTimer()" class="text-xs font-bold text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-white px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700 transition" title="Sleep Timer">
-                    <i data-lucide="moon" class="w-4 h-4"></i>
-                </button>
-                <i data-lucide="volume-2" class="w-4 h-4 text-slate-500 dark:text-slate-400"></i>
-                <input type="range" id="volSlider" value="100" max="100" class="w-20 h-1 rounded-lg appearance-none cursor-pointer" oninput="setVolume(this.value)">
-            </div>
-        </div>
-        <audio id="audioEl" preload="none"></audio>
-    </footer>
-
-    <!-- Toast Notification -->
-    <div id="toast" class="fixed bottom-24 right-6 bg-blue-600 text-white px-4 py-3 rounded-lg shadow-xl transform translate-y-20 opacity-0 transition-all duration-300 z-50 flex items-center gap-3">
-        <i id="toastIcon" data-lucide="info" class="w-5 h-5"></i>
-        <span id="toastMsg" class="font-medium text-sm">Notification</span>
-    </div>
-
-    <script>
-        // State
-        const state = {
-            searchResults: [],
-            currentPodcast: null,
-            currentEpisodeIndex: -1,
-            episodes: [],
-            audio: document.getElementById('audioEl'),
-            isPlaying: false,
-            playbackRate: 1.0,
-            sleepTimer: null,
-            sleepMinutes: 0,
-            notifications: [] 
-        };
-
-        // DOM Elements
-        const searchInput = document.getElementById('searchInput');
-        const mainContent = document.getElementById('mainContent');
-        const welcomeState = document.getElementById('welcomeState');
-        const searchResults = document.getElementById('searchResults');
-        const podcastDetail = document.getElementById('podcastDetail');
-        const detailHeader = document.getElementById('detailHeader');
-        const episodesList = document.getElementById('episodesList');
-        const episodeCount = document.getElementById('episodeCount');
-        const globalLoader = document.getElementById('globalLoader');
-        const playerFooter = document.getElementById('playerFooter');
-        const recentSearchesContainer = document.getElementById('recentSearchesContainer');
-        const recentSearchesList = document.getElementById('recentSearchesList');
-        const favoritesContainer = document.getElementById('favoritesContainer');
-        const favoritesList = document.getElementById('favoritesList');
-        const recommendedContainer = document.getElementById('recommendedContainer');
-        const recommendedList = document.getElementById('recommendedList');
-        const speedBtn = document.getElementById('speedBtn');
-        const sleepBtn = document.getElementById('sleepBtn');
-        const volSlider = document.getElementById('volSlider');
-        const similarContainer = document.getElementById('similarContainer');
-        const similarList = document.getElementById('similarList');
-        const notifModal = document.getElementById('notifModal');
-        const notifList = document.getElementById('notifList');
-        const notifBadge = document.getElementById('notifBadge');
-
-        // --- Init ---
-        if (localStorage.theme === 'light' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: light)').matches)) {
-            document.documentElement.classList.remove('dark');
-            updateThemeIcon('sun');
-        } else {
-            document.documentElement.classList.add('dark');
-            updateThemeIcon('moon');
-        }
-
-        const savedVol = localStorage.getItem('playerVolume');
-        if (savedVol !== null) {
-            state.audio.volume = parseFloat(savedVol);
-            volSlider.value = parseFloat(savedVol) * 100;
-        }
-
-        loadRecentSearches();
-        loadFavorites();
-        loadRecommendations(); // Replaces liked episodes
-        loadNotifications(); 
-
-        lucide.createIcons();
-
-        // Start Auto-Check Interval (Every 5 minutes)
-        setInterval(() => {
-            checkForNewEpisodes(true);
-        }, 5 * 60 * 1000);
-
-        // --- Navigation ---
-
-        function goHome() {
-            welcomeState.classList.remove('hidden');
-            searchResults.classList.add('hidden');
-            podcastDetail.classList.add('hidden');
-            searchInput.value = '';
-            loadRecentSearches();
-            loadFavorites();
-            loadRecommendations();
-        }
-
-        function showLoader(show) {
-            if(show) {
-                globalLoader.classList.remove('hidden');
-                mainContent.classList.add('overflow-hidden');
-            } else {
-                globalLoader.classList.add('hidden');
-                mainContent.classList.remove('overflow-hidden');
-            }
-        }
-
-        // --- Theme Logic ---
-        function toggleTheme() {
-            const html = document.documentElement;
-            if (html.classList.contains('dark')) {
-                html.classList.remove('dark');
-                localStorage.setItem('theme', 'light');
-                updateThemeIcon('sun');
-            } else {
-                html.classList.add('dark');
-                localStorage.setItem('theme', 'dark');
-                updateThemeIcon('moon');
-            }
-        }
-
-        function updateThemeIcon(type) {
-            const icon = document.getElementById('themeIcon');
-            icon.setAttribute('data-lucide', type);
-            lucide.createIcons();
-        }
-
-        function handleEnter(e) {
-            if (e.key === 'Enter') {
-                performSearch();
-            }
-        }
-
-        // --- Notifications Logic ---
-
-        function toggleNotificationsMenu() {
-            if (notifModal.classList.contains('hidden')) {
-                notifModal.classList.remove('hidden');
-                notifBadge.classList.add('hidden');
-            } else {
-                notifModal.classList.add('hidden');
-            }
-        }
-
-        function handleNotificationClick(podcast) {
-            if (!podcast) return;
-            toggleNotificationsMenu(); 
-            loadSavedPodcast(podcast); 
-        }
-
-        function loadNotifications() {
-            const saved = JSON.parse(localStorage.getItem('podNotifications') || '[]');
-            state.notifications = saved;
-            renderNotifications();
-        }
-
-        function renderNotifications() {
-            if (state.notifications.length === 0) {
-                notifList.innerHTML = `
-                    <div class="text-center text-slate-500 dark:text-slate-400 py-10">
-                        <i data-lucide="bell-off" class="w-8 h-8 mx-auto mb-2 opacity-50"></i>
-                        <p>No new episodes.</p>
-                        <p class="text-xs mt-2 opacity-70">Follow podcasts to see updates here.</p>
-                    </div>
-                `;
-            } else {
-                notifList.innerHTML = state.notifications.map(n => {
-                    const podData = n.podcast ? JSON.stringify(n.podcast).replace(/'/g, "&#39;") : "null";
-                    const clickAttr = n.podcast ? `onclick='handleNotificationClick(${podData})'` : "";
-                    const cursorClass = n.podcast ? "cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 transition" : "opacity-75";
-
-                    return `
-                    <div ${clickAttr} class="flex gap-3 p-3 bg-slate-50 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 animate-fade-in ${cursorClass}">
-                        <img src="${n.image}" class="w-12 h-12 rounded object-cover bg-slate-200">
-                        <div class="flex-1 min-w-0">
-                            <p class="text-[10px] text-blue-600 dark:text-blue-400 font-bold uppercase tracking-wider mb-0.5 line-clamp-1">${n.podcastTitle}</p>
-                            <h4 class="text-sm font-semibold text-slate-900 dark:text-white line-clamp-2 leading-tight">${n.episodeTitle}</h4>
-                            <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">${new Date(n.date).toLocaleDateString()}</p>
-                        </div>
-                    </div>
-                `}).join('');
-            }
-            lucide.createIcons();
-        }
-
-        async function checkForNewEpisodes(isAuto = false) {
-            const btn = document.getElementById('checkUpdateBtn');
-            const originalText = btn.innerHTML;
-            
-            if (!isAuto) {
-                btn.innerHTML = `<div class="loader w-3 h-3 border-2 border-white"></div> Checking...`;
-                btn.disabled = true;
-            }
-
-            const following = JSON.parse(localStorage.getItem('favorites') || '[]');
-            const newNotifications = [];
-            const toCheck = following.slice(0, 10); 
-
-            const checks = toCheck.map(async (pod) => {
-                try {
-                    const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(pod.feedUrl)}`);
-                    if(!res.ok) return;
-                    const data = await res.json();
-                    if(!data.contents) return;
-
-                    const parser = new DOMParser();
-                    const doc = parser.parseFromString(data.contents, "text/xml");
-                    const item = doc.querySelector('item');
-                    if(!item) return;
-
-                    const pubDateStr = getTagValue(item, 'pubDate');
-                    const pubDate = new Date(pubDateStr);
-                    const title = getTagValue(item, 'title');
-
-                    const sevenDaysAgo = new Date();
-                    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
-                    if (pubDate > sevenDaysAgo) {
-                        newNotifications.push({
-                            podcastTitle: pod.collectionName,
-                            episodeTitle: title,
-                            date: pubDate,
-                            image: pod.artworkUrl600,
-                            podcast: pod 
-                        });
-                    }
-                } catch(e) { console.warn("Update check failed for " + pod.collectionName); }
-            });
-
-            await Promise.all(checks);
-
-            newNotifications.sort((a,b) => new Date(b.date) - new Date(a.date));
-            const simplify = (list) => list.map(n => ({t: n.episodeTitle, d: n.date}));
-            const isDifferent = JSON.stringify(simplify(newNotifications)) !== JSON.stringify(simplify(state.notifications));
-
-            if (isDifferent) {
-                state.notifications = newNotifications;
-                localStorage.setItem('podNotifications', JSON.stringify(state.notifications));
-                renderNotifications();
-                
-                if (newNotifications.length > 0) {
-                    if(isAuto) {
-                        showToast(`Found ${newNotifications.length} recent episodes!`, 'bell-ring');
-                        notifBadge.classList.remove('hidden');
-                        const notifIcon = document.getElementById('notifIcon');
-                        if(notifIcon) notifIcon.classList.add('animate-bounce-short');
-                    } else {
-                        showToast(`Found ${newNotifications.length} recent episodes!`, 'bell-ring');
-                        if(notifModal.classList.contains('hidden')) toggleNotificationsMenu();
-                    }
-                } else if (!isAuto) {
-                    showToast("No new episodes found.", "check");
-                }
-            } else if (!isAuto) {
-                showToast("No new episodes found.", "check");
-            }
-            
-            if (!isAuto) {
-                btn.innerHTML = originalText;
-                btn.disabled = false;
-                lucide.createIcons();
-            }
-        }
-
-        // --- Recommendation Algorithm Logic ---
-
-        function isEpisodeLiked(url) {
-            const liked = JSON.parse(localStorage.getItem('likedEpisodes') || '[]');
-            return liked.some(ep => ep.audioUrl === url);
-        }
-
-        function toggleLikeEpisode(index) {
-            if (!state.currentPodcast || !state.episodes[index]) return;
-            
-            const ep = state.episodes[index];
-            const pod = state.currentPodcast;
-            const genre = pod.primaryGenreName;
-            
-            // Check if already liked to toggle logic
-            const isLiked = isEpisodeLiked(ep.audioUrl);
-            
-            // Update Genre Preferences (The Algorithm)
-            let counts = JSON.parse(localStorage.getItem('genrePreferences') || '{}');
-            
-            if (isLiked) {
-                // Unlike: Remove from lists and decrement preference weight
-                let likedList = JSON.parse(localStorage.getItem('likedEpisodes') || '[]');
-                likedList = likedList.filter(e => e.audioUrl !== ep.audioUrl);
-                localStorage.setItem('likedEpisodes', JSON.stringify(likedList));
-                
-                // Decrement weight but keep >= 0
-                counts[genre] = Math.max(0, (counts[genre] || 1) - 1);
-                showToast("Unliked. Recommendations updated.", "thumbs-down");
-            } else {
-                // Like: Add to list (for state tracking) and increment preference weight
-                let likedList = JSON.parse(localStorage.getItem('likedEpisodes') || '[]');
-                likedList.push({
-                    title: ep.title,
-                    audioUrl: ep.audioUrl,
-                    duration: ep.duration,
-                    pubDate: ep.pubDate,
-                    podcastTitle: pod.collectionName,
-                    artworkUrl: pod.artworkUrl600,
-                    collectionId: pod.collectionId
-                });
-                localStorage.setItem('likedEpisodes', JSON.stringify(likedList));
-                
-                // Increment weight
-                counts[genre] = (counts[genre] || 0) + 1;
-                showToast("Liked! We'll recommend more like this.", "thumbs-up");
-            }
-            
-            localStorage.setItem('genrePreferences', JSON.stringify(counts));
-            
-            // Re-render UI
-            renderPodcastDetail(pod, null, false, true); 
-        }
-
-        async function loadRecommendations() {
-            const counts = JSON.parse(localStorage.getItem('genrePreferences') || '{}');
-            const genres = Object.keys(counts);
-            
-            // Find top genre
-            let topGenre = null;
-            let maxCount = 0;
-            genres.forEach(g => {
-                if (counts[g] > maxCount) {
-                    maxCount = counts[g];
-                    topGenre = g;
-                }
-            });
-
-            if (topGenre && maxCount > 0) {
-                recommendedContainer.classList.remove('hidden');
-                
-                try {
-                    // Fetch top podcasts for this genre
-                    const response = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(topGenre)}&media=podcast&entity=podcast&limit=10`);
-                    const data = await response.json();
-                    
-                    // Filter out podcasts user already follows
-                    const following = JSON.parse(localStorage.getItem('favorites') || '[]');
-                    const followingIds = following.map(p => p.collectionId);
-                    
-                    // Take top 5 not followed
-                    const recommendations = data.results
-                        .filter(p => !followingIds.includes(p.collectionId))
-                        .slice(0, 5);
-
-                    if (recommendations.length > 0) {
-                        recommendedList.innerHTML = recommendations.map(pod => `
-                            <div onclick='loadSavedPodcast(${JSON.stringify(pod).replace(/'/g, "&#39;")})' class="bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 transition rounded-xl p-3 cursor-pointer group flex flex-col h-full border border-slate-200 dark:border-slate-700/50 hover:border-blue-400 dark:hover:border-blue-500/50 shadow-sm hover:shadow-lg relative">
-                                <div class="absolute top-2 right-2 bg-blue-600 text-white text-[9px] px-1.5 py-0.5 rounded-full font-bold z-10 shadow-sm">FOR YOU</div>
-                                <img src="${pod.artworkUrl600}" alt="${pod.collectionName}" class="w-full aspect-square object-cover rounded-lg mb-2 bg-slate-200 dark:bg-slate-900 shadow-md group-hover:scale-[1.02] transition-transform duration-300">
-                                <h3 class="font-bold text-slate-900 dark:text-white text-xs line-clamp-1 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">${pod.collectionName}</h3>
-                                <p class="text-[10px] text-slate-500 dark:text-slate-400 line-clamp-1">${pod.artistName}</p>
-                            </div>
-                        `).join('');
-                    } else {
-                        // Fallback if user follows everything
-                        recommendedContainer.classList.add('hidden');
-                    }
-                } catch(e) {
-                    console.warn("Failed to load recs", e);
-                    recommendedContainer.classList.add('hidden');
-                }
-            } else {
-                recommendedContainer.classList.add('hidden');
-            }
-        }
-
-        // --- Follow/Favorites Logic ---
-
-        function isFavorite(id) {
-            const favs = JSON.parse(localStorage.getItem('favorites') || '[]');
-            return favs.some(p => p.collectionId === id);
-        }
-
-        function toggleFollow() {
-            if (!state.currentPodcast) return;
-            
-            const pod = state.currentPodcast;
-            let favs = JSON.parse(localStorage.getItem('favorites') || '[]');
-            
-            if (isFavorite(pod.collectionId)) {
-                favs = favs.filter(p => p.collectionId !== pod.collectionId);
-                showToast("Unfollowed", "user-minus");
-            } else {
-                favs.push(pod);
-                showToast("Following podcast!", "user-check");
-            }
-            
-            localStorage.setItem('favorites', JSON.stringify(favs));
-            renderPodcastDetail(pod, null, false, true); 
-        }
-
-        function loadFavorites() {
-            const favs = JSON.parse(localStorage.getItem('favorites') || '[]');
-            if (favs.length > 0) {
-                favoritesContainer.classList.remove('hidden');
-                favoritesList.innerHTML = favs.map(pod => `
-                    <div onclick='loadSavedPodcast(${JSON.stringify(pod).replace(/'/g, "&#39;")})' class="bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 transition rounded-xl p-3 cursor-pointer group flex flex-col h-full border border-slate-200 dark:border-slate-700/50 hover:border-blue-400 dark:hover:border-blue-500/50 shadow-sm hover:shadow-lg relative">
-                        <img src="${pod.artworkUrl600}" alt="${pod.collectionName}" class="w-full aspect-square object-cover rounded-lg mb-2 bg-slate-200 dark:bg-slate-900 shadow-md group-hover:scale-[1.02] transition-transform duration-300">
-                        <h3 class="font-bold text-slate-900 dark:text-white text-xs line-clamp-1 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">${pod.collectionName}</h3>
-                    </div>
-                `).join('');
-            } else {
-                favoritesContainer.classList.add('hidden');
-            }
-        }
-
-        // --- Similar Podcasts Logic ---
-
-        async function fetchSimilarPodcasts(genre, currentId) {
-            similarContainer.classList.add('hidden'); 
-
-            if (!genre) return;
-
-            try {
-                const response = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(genre)}&media=podcast&entity=podcast&limit=6`);
-                const data = await response.json();
-                
-                const similar = data.results.filter(p => p.collectionId !== currentId).slice(0, 5); 
-
-                if (similar.length > 0) {
-                    similarList.innerHTML = similar.map(pod => `
-                        <div onclick='loadSavedPodcast(${JSON.stringify(pod).replace(/'/g, "&#39;")})' class="bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 transition rounded-xl p-3 cursor-pointer group flex flex-col h-full border border-slate-200 dark:border-slate-700/50 hover:border-blue-400 dark:hover:border-blue-500/50 shadow-sm hover:shadow-lg">
-                            <img src="${pod.artworkUrl600}" class="w-full aspect-square object-cover rounded-lg mb-2 bg-slate-200 dark:bg-slate-900 shadow-md group-hover:scale-[1.02] transition-transform duration-300">
-                            <h3 class="font-bold text-slate-900 dark:text-white text-xs line-clamp-1 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">${pod.collectionName}</h3>
-                            <p class="text-[10px] text-slate-500 dark:text-slate-400 line-clamp-1">${pod.artistName}</p>
-                        </div>
-                    `).join('');
-                    similarContainer.classList.remove('hidden');
-                }
-            } catch (e) {
-                console.warn("Failed to fetch similar podcasts", e);
-            }
-        }
-
-        // --- Search Functionality ---
+    def apply_view(view):
+        nonlocal current_view
+        if current_view == view and view not in (VIEW_ZOOMED_P1, VIEW_ZOOMED_P2):
+            return
+        current_view = view
         
-        function searchCategory(term) {
-            searchInput.value = term;
-            performSearch();
-        }
+        if view == VIEW_ZOOMED_P1:
+            root.scale = 2
+            cam = p1_x - (LOGICAL_W / 2)
+            if cam < 0: cam = 0
+            if cam > MAP_W - LOGICAL_W: cam = MAP_W - LOGICAL_W
+            world_group.x = -int(cam)
+            world_group.y = 0
+            p1_hp_bar.x = 5
+            p1_hp_bar.y = 5
+            p2_hp_bar.x = LOGICAL_W - 55
+            p2_hp_bar.y = 5
+            p1_en_bar.x = 5
+            p1_en_bar.y = 11
+            p2_en_bar.x = LOGICAL_W - 55
+            p2_en_bar.y = 11
+            score_label.x = 90
+            score_label.y = 10
+            status_label.x = 65
+            status_label.y = 25
+        elif view == VIEW_ZOOMED_P2:
+            root.scale = 2
+            cam = p2_x - (LOGICAL_W / 2)
+            if cam < 0: cam = 0
+            if cam > MAP_W - LOGICAL_W: cam = MAP_W - LOGICAL_W
+            world_group.x = -int(cam)
+            world_group.y = 0
+            p1_hp_bar.x = 5
+            p1_hp_bar.y = 5
+            p2_hp_bar.x = LOGICAL_W - 55
+            p2_hp_bar.y = 5
+            p1_en_bar.x = 5
+            p1_en_bar.y = 11
+            p2_en_bar.x = LOGICAL_W - 55
+            p2_en_bar.y = 11
+            score_label.x = 90
+            score_label.y = 10
+            status_label.x = 65
+            status_label.y = 25
+        elif view == VIEW_FULL_MAP:
+            root.scale = 1
+            world_group.x = 0
+            world_group.y = 80
+            p1_hp_bar.x = 10
+            p1_hp_bar.y = 10
+            p2_hp_bar.x = 480 - 65
+            p2_hp_bar.y = 10
+            p1_en_bar.x = 10
+            p1_en_bar.y = 22
+            p2_en_bar.x = 480 - 65
+            p2_en_bar.y = 22
+            score_label.x = 200
+            score_label.y = 20
+            status_label.x = 150
+            status_label.y = 45
 
-        function saveRecentSearch(term) {
-            if (!term) return;
-            let searches = JSON.parse(localStorage.getItem('recentSearches') || '[]');
-            searches = searches.filter(s => s.toLowerCase() !== term.toLowerCase());
-            searches.unshift(term);
-            if (searches.length > 8) searches.pop();
-            localStorage.setItem('recentSearches', JSON.stringify(searches));
-        }
+    # ==========================================
+    # GAME STATE
+    # ==========================================
+    STATE_P1_AIM = 0
+    STATE_P2_AIM = 1
+    STATE_SHELL_FLY = 2
+    STATE_AI_THINK = 3
+    STATE_GAME_OVER = 4
+    STATE_MAP_OVERVIEW = 5
 
-        function loadRecentSearches() {
-            const searches = JSON.parse(localStorage.getItem('recentSearches') || '[]');
-            if (searches.length > 0) {
-                recentSearchesContainer.classList.remove('hidden');
-                recentSearchesList.innerHTML = searches.map(term => `
-                    <button onclick="searchCategory('${term}')" class="px-3 py-1 bg-slate-200 dark:bg-slate-800 hover:bg-blue-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-md text-xs border border-transparent hover:border-blue-400 dark:hover:border-blue-500/50 transition flex items-center gap-1 group">
-                        <i data-lucide="clock" class="w-3 h-3 text-slate-400"></i>
-                        ${term}
-                    </button>
-                `).join('');
-                lucide.createIcons();
-            } else {
-                recentSearchesContainer.classList.add('hidden');
-            }
-        }
+    state = STATE_P1_AIM
+    score = 0
+    is_2player = False
+    
+    p1_hp = 100
+    p2_hp = 100
+    p1_energy = 50.0
+    p2_energy = 50.0
+    
+    p1_x, p1_y = 40.0, 0.0
+    p2_x, p2_y = float(MAP_W - 60), 0.0
+    
+    sh_x, sh_y = 0.0, 0.0
+    sh_vx, sh_vy = 0.0, 0.0
+    active_shooter = 1 
+    
+    charge_power = 0.0
+    charging = False
+    prev_blue = False
+    prev_yellow = False
+    prev_joy = False
+    
+    p1_preferred_view = VIEW_ZOOMED_P1
+    p2_preferred_view = VIEW_ZOOMED_P2
+    
+    ai_timer = 0
+    ai_target_x = p2_x
+    exp_timer = 0
+    overview_timer = 0
+    next_state_after_overview = STATE_P1_AIM
+    
+    ai_error = 2.5
+    ai_last_p1_x = p1_x
 
-        function clearRecentSearches() {
-            localStorage.removeItem('recentSearches');
-            loadRecentSearches();
-        }
+    generate_terrain()
+    p1_y = settle_tank(p1_x, 50)
+    p2_y = settle_tank(p2_x, 50)
+    status_label.text = "P1 TURN"
+    apply_view(VIEW_ZOOMED_P1)
+    gc.collect()
 
-        async function performSearch() {
-            const query = searchInput.value.trim();
-            if (!query) return;
+    while True:
+        if not red_btn.value:
+            supervisor.set_next_code_file("code.py")
+            supervisor.reload()
 
-            saveRecentSearch(query);
+        blue_pressed = not blue_btn.value
+        yellow_pressed = not yellow_btn.value
+        joy_pressed = not joy_btn.value
+        GRAVITY = 0.15
 
-            showLoader(true);
-            try {
-                const response = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(query)}&media=podcast&entity=podcast&limit=25`);
-                const data = await response.json();
+        # Toggle 2-Player mode by pressing Joystick Click
+        if joy_pressed and not prev_joy:
+            is_2player = not is_2player
+            if is_2player:
+                status_label.text = "2-PLAYER MODE"
+            else:
+                status_label.text = "1-PLAYER MODE"
+
+        # ------------------------------------------
+        # EXPLOSION ANIMATION
+        # ------------------------------------------
+        if exp_timer > 0:
+            exp_timer -= 1
+            if exp_timer == 0:
+                explosion.x = -50 
+                p1_y = settle_tank(p1_x, p1_y)
+                p2_y = settle_tank(p2_x, p2_y)
                 
-                state.searchResults = data.results;
-                renderSearchResults();
-            } catch (error) {
-                showToast('Failed to search podcasts. Try again.', 'alert-circle');
-                console.error(error);
-            } finally {
-                showLoader(false);
-            }
-        }
-
-        function renderSearchResults() {
-            welcomeState.classList.add('hidden');
-            podcastDetail.classList.add('hidden');
-            searchResults.classList.remove('hidden');
-            
-            searchResults.innerHTML = state.searchResults.map((pod, index) => `
-                <div onclick="loadPodcast(${index})" class="bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 transition rounded-xl p-4 cursor-pointer group flex flex-col h-full border border-slate-200 dark:border-slate-700/50 hover:border-blue-400 dark:hover:border-blue-500/50 shadow-sm hover:shadow-lg">
-                    <img src="${pod.artworkUrl600}" alt="${pod.collectionName}" class="w-full aspect-square object-cover rounded-lg mb-3 bg-slate-200 dark:bg-slate-900 shadow-md group-hover:scale-[1.02] transition-transform duration-300">
-                    <h3 class="font-bold text-slate-900 dark:text-white text-sm line-clamp-2 mb-1 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">${pod.collectionName}</h3>
-                    <p class="text-xs text-slate-500 dark:text-slate-400 line-clamp-1">${pod.artistName}</p>
-                </div>
-            `).join('');
-        }
-
-        // --- Podcast Details & RSS Parsing ---
-
-        async function loadPodcast(index) {
-            const podcast = state.searchResults[index];
-            loadPodcastData(podcast);
-        }
-
-        async function loadSavedPodcast(podcast) {
-            loadPodcastData(podcast);
-        }
-
-        async function loadPodcastData(podcast) {
-            state.currentPodcast = podcast;
-            showLoader(true);
-            state.episodes = []; 
-            state.currentEpisodeIndex = -1; 
-
-            fetchSimilarPodcasts(podcast.primaryGenreName, podcast.collectionId);
-
-            // Helper: Fetch with timeout and parsing
-            const fetchAndParse = async (urlProvider) => {
-                const url = urlProvider(podcast.feedUrl);
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 8000); // 8s timeout
-
-                try {
-                    const res = await fetch(url, { signal: controller.signal });
-                    clearTimeout(timeoutId);
-                    if (!res.ok) throw new Error('Status ' + res.status);
-                    
-                    let text;
-                    // Handle AllOrigins JSON wrapper
-                    if (url.includes('api.allorigins.win/get')) {
-                        const data = await res.json();
-                        text = data.contents;
-                    } else {
-                        text = await res.text();
-                    }
-
-                    if (!text || typeof text !== 'string' || text.trim().length === 0) {
-                        throw new Error('Empty or invalid response');
-                    }
-
-                    // Clean XML (remove BOM and leading whitespace)
-                    text = text.trim().replace(/^\uFEFF/, '');
-
-                    const parser = new DOMParser();
-                    const doc = parser.parseFromString(text, "text/xml");
-                    
-                    // Verify valid XML
-                    if (doc.querySelector('parsererror')) {
-                        throw new Error('XML Parse Error');
-                    }
-                    // Verify it's actually a feed
-                    if (!doc.querySelector('channel') && !doc.querySelector('feed')) {
-                        throw new Error('Invalid Feed Format');
-                    }
-
-                    return doc;
-                } catch (e) {
-                    clearTimeout(timeoutId);
-                    throw e;
-                }
-            };
-
-            // Define robust strategies
-            const strategies = [
-                // 1. Try Direct (Best if allowed)
-                (u) => u,
-                // 2. AllOrigins Raw (Reliable)
-                (u) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
-                // 3. ThingProxy (Good backup)
-                (u) => `https://thingproxy.freeboard.io/fetch/${encodeURIComponent(u)}`,
-                // 4. CorsProxy (Fast but sometimes blocked)
-                (u) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
-                // 5. AllOrigins JSON (Handles weird MIME types)
-                (u) => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`
-            ];
-            
-            try {
-                // Race the strategies using Promise.any
-                // We map them to promises that execute immediately
-                const promises = strategies.map(s => fetchAndParse(s));
-                const xmlDoc = await Promise.any(promises);
-
-                const items = Array.from(xmlDoc.querySelectorAll('item'));
+                # Update Bars
+                p1_hp_bar.width = max(1, int((p1_hp / 100.0) * 50))
+                p2_hp_bar.width = max(1, int((p2_hp / 100.0) * 50))
                 
-                state.episodes = items.map(item => {
-                    const enclosure = item.querySelector('enclosure');
-                    return {
-                        title: getTagValue(item, 'title'),
-                        description: getTagValue(item, 'description').replace(/<[^>]*>?/gm, ''), 
-                        pubDate: new Date(getTagValue(item, 'pubDate')),
-                        duration: getTagValue(item, 'itunes:duration') || '??:??',
-                        audioUrl: enclosure ? enclosure.getAttribute('url') : null,
-                        type: enclosure ? enclosure.getAttribute('type') : 'audio/mpeg',
-                        guid: getTagValue(item, 'guid') || Math.random().toString()
-                    };
-                }).filter(ep => ep.audioUrl); 
-
-                // Sort episodes by date (Newest first)
-                state.episodes.sort((a, b) => b.pubDate - a.pubDate);
-
-                renderPodcastDetail(podcast, xmlDoc);
-
-            } catch (error) {
-                console.error("All strategies failed:", error);
-                // Even on error, we try to render the restricted view
-                showToast('Could not load feed. It might be blocked.', 'alert-triangle');
-                renderPodcastDetail(podcast, null, true);
-            } finally {
-                showLoader(false);
-            }
-        }
-
-        function getTagValue(parent, tagName) {
-            const el = parent.getElementsByTagName(tagName)[0] || parent.getElementsByTagName('itunes:' + tagName)[0]; 
-            return el ? el.textContent : '';
-        }
-
-        function renderPodcastDetail(podcast, xmlDoc, isError = false, skipListRebuild = false) {
-            searchResults.classList.add('hidden');
-            podcastDetail.classList.remove('hidden');
-            welcomeState.classList.add('hidden'); 
-
-            let cleanDesc = 'No description available.';
+                if state == STATE_GAME_OVER:
+                    pass
+                elif p1_hp <= 0 or p1_y >= LOGICAL_H - TANK_H:
+                    status_label.text = "P2 WINS! BLUE RSTRT" if is_2player else "DEFEATED! BLUE RSTRT"
+                    state = STATE_GAME_OVER
+                elif p2_hp <= 0 or p2_y >= LOGICAL_H - TANK_H:
+                    status_label.text = "P1 WINS! BLUE RSTRT" if is_2player else "ENEMY DESTROYED!"
+                    score += 1
+                    score_label.text = f"SCORE: {score}"
+                    state = STATE_GAME_OVER
+                else:
+                    state = STATE_MAP_OVERVIEW
+                    overview_timer = 30
+                    if active_shooter == 1:
+                        next_state_after_overview = STATE_P2_AIM if is_2player else STATE_AI_THINK
+                    else:
+                        next_state_after_overview = STATE_P1_AIM
             
-            if (xmlDoc && !isError) {
-                const rssDesc = xmlDoc.querySelector('channel > description')?.textContent || '';
-                cleanDesc = rssDesc.replace(/<[^>]*>?/gm, '').substring(0, 300) + (rssDesc.length > 300 ? '...' : '');
-            } else if (isError) {
-                cleanDesc = "We couldn't load the RSS feed for this podcast. It might be blocked by the publisher's server.";
-            }
+            display.refresh(target_frames_per_second=40)
+            continue
 
-            const isFav = isFavorite(podcast.collectionId);
-            const favIconClass = isFav ? "fill-blue-600 text-blue-600 dark:fill-blue-500 dark:text-blue-500" : "text-slate-400 dark:text-slate-500 hover:text-blue-500 dark:hover:text-blue-400";
-            const favText = isFav ? "Following" : "Follow";
+        # ------------------------------------------
+        # STATE: MAP OVERVIEW TRANSITION
+        # ------------------------------------------
+        if state == STATE_MAP_OVERVIEW:
+            apply_view(VIEW_FULL_MAP)
+            overview_timer -= 1
+            if overview_timer <= 0:
+                state = next_state_after_overview
+                if state == STATE_AI_THINK:
+                    apply_view(VIEW_ZOOMED_P2)
+                    ai_timer = 35
+                    ai_target_x = p2_x + random.uniform(-30, 30)
+                    if ai_target_x < MAP_W - 160: ai_target_x = MAP_W - 160
+                    if ai_target_x > MAP_W - 25: ai_target_x = MAP_W - 25
+                    status_label.text = "AI AIMING..."
+                elif state == STATE_P2_AIM:
+                    apply_view(p2_preferred_view)
+                    p2_energy = 50.0
+                    p2_en_bar.width = 50
+                    status_label.text = "PASS TO P2!"
+                elif state == STATE_P1_AIM:
+                    apply_view(p1_preferred_view)
+                    p1_energy = 50.0
+                    p1_en_bar.width = 50
+                    status_label.text = "PASS TO P1!" if is_2player else "P1 TURN"
 
-            // Header
-            detailHeader.innerHTML = `
-                <img src="${podcast.artworkUrl600}" class="w-48 h-48 rounded-xl shadow-lg bg-slate-200 dark:bg-slate-800 object-cover shrink-0 mx-auto md:mx-0">
-                <div class="flex-1 text-center md:text-left">
-                    <div class="flex flex-col md:flex-row justify-between items-start gap-4">
-                        <div>
-                            <h2 class="text-3xl font-bold text-slate-900 dark:text-white mb-2">${podcast.collectionName}</h2>
-                            <p class="text-blue-600 dark:text-blue-400 font-medium mb-4">${podcast.artistName}</p>
-                        </div>
-                        <button onclick="toggleFollow()" class="flex items-center gap-2 px-6 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full shadow-sm hover:shadow-md transition-all self-center md:self-start font-medium text-sm ${isFav ? 'text-blue-600 dark:text-blue-400' : 'text-slate-600 dark:text-slate-300'}">
-                            <i data-lucide="${isFav ? 'user-check' : 'user-plus'}" class="w-4 h-4"></i>
-                            <span>${favText}</span>
-                        </button>
-                    </div>
-                    <p class="text-slate-500 dark:text-slate-400 text-sm leading-relaxed max-w-2xl">${cleanDesc}</p>
-                    <div class="mt-4 flex flex-wrap gap-2 justify-center md:justify-start">
-                        <span class="px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-xs text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">${podcast.primaryGenreName}</span>
-                    </div>
-                </div>
-            `;
+        # ------------------------------------------
+        # STATE: PLAYER 1 AIMING & MOVING
+        # ------------------------------------------
+        elif state == STATE_P1_AIM:
+            if yellow_pressed and not prev_yellow:
+                p1_preferred_view = VIEW_FULL_MAP if p1_preferred_view == VIEW_ZOOMED_P1 else VIEW_ZOOMED_P1
             
-            lucide.createIcons();
-
-            if (skipListRebuild) return;
-
-            episodeCount.innerText = `${state.episodes.length} Episodes`;
-
-            if (state.episodes.length === 0) {
-                const duckyQuery = `!ducky site:player.fm/series ${podcast.collectionName}`;
-                const duckyUrl = `https://duckduckgo.com/?q=${encodeURIComponent(duckyQuery)}`;
+            apply_view(p1_preferred_view)
+            
+            jx = joy_x.value - CENTER_X
+            if abs(jx) > 4000 and p1_energy > 0:
+                move = -(jx / 32768.0) * 1.5
+                new_x = p1_x + move
+                if 5 < new_x < MAP_W - 20:
+                    dist_moved = abs(new_x - p1_x)
+                    if p1_energy - dist_moved >= 0:
+                        p1_x = new_x
+                        p1_energy -= dist_moved
+                        p1_y = settle_tank(p1_x, 0)
+                        p1_en_bar.width = max(1, int((p1_energy / 50.0) * 50))
+            
+            angle = (pot.value / 65535.0) * math.pi
+            p1_barrel.points = get_barrel_pts(angle, BARREL_LENGTH)
+            
+            if blue_pressed:
+                charging = True
+                charge_power += 0.15
+                if charge_power > 12.0: charge_power = 12.0
+                power_bar.width = max(1, int((charge_power / 12.0) * 100))
+                power_bar.y = 20 
+            
+            elif charging and not blue_pressed:
+                sh_x = p1_x + TANK_W/2
+                sh_y = p1_y - 2
+                sh_vx = math.cos(angle) * charge_power
+                sh_vy = -math.sin(angle) * charge_power
+                active_shooter = 1
+                state = STATE_SHELL_FLY
+                apply_view(VIEW_FULL_MAP)
                 
-                episodesList.innerHTML = `
-                    <div class="p-12 text-center flex flex-col items-center justify-center">
-                        <div class="bg-slate-100 dark:bg-slate-800 p-4 rounded-full mb-4 border border-slate-200 dark:border-slate-700">
-                            <i data-lucide="lock" class="w-8 h-8 text-slate-400 dark:text-slate-400"></i>
-                        </div>
-                        <h3 class="text-xl font-bold text-slate-900 dark:text-white mb-2">Feed Restricted</h3>
-                        <p class="text-slate-500 dark:text-slate-400 max-w-md mb-8">
-                            This podcast is protected and cannot be downloaded directly in the browser. 
-                        </p>
-                        
-                        <a href="${duckyUrl}" target="_blank" rel="noopener noreferrer" 
-                           class="flex items-center gap-2 bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-6 py-3 rounded-full font-bold hover:bg-slate-700 dark:hover:bg-slate-200 transition transform hover:scale-105 shadow-lg mb-4">
-                            <span>Open on Player FM</span>
-                            <i data-lucide="external-link" class="w-4 h-4"></i>
-                        </a>
+                charging = False
+                charge_power = 0.0
+                power_bar.y = -10 
+                status_label.text = "FIRE!"
 
-                        <p class="text-[10px] text-slate-400 dark:text-slate-500">
-                            Auto-redirects via DuckDuckGo (!ducky)
-                        </p>
-                    </div>
-                `;
-            } else {
-                const playedEpisodes = JSON.parse(localStorage.getItem('playedEpisodes') || '[]');
-
-                episodesList.innerHTML = state.episodes.map((ep, i) => {
-                    const isPlayed = playedEpisodes.includes(ep.audioUrl);
-                    const isActive = (i === state.currentEpisodeIndex);
-                    const isLiked = isEpisodeLiked(ep.audioUrl);
-                    
-                    let bgClass = "bg-transparent";
-                    let opacityClass = isPlayed ? "opacity-60 grayscale" : "";
-                    
-                    if(isActive) {
-                        bgClass = "bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500";
-                        opacityClass = ""; 
-                    } else if (isPlayed) {
-                        bgClass = "bg-slate-50/50 dark:bg-slate-800/30";
-                    }
-
-                    return `
-                    <div class="group p-4 hover:bg-slate-100 dark:hover:bg-slate-700/30 transition flex flex-col sm:flex-row gap-4 items-start sm:items-center ${bgClass} ${opacityClass}">
-                        <div class="flex-1 min-w-0">
-                            <div class="flex items-center gap-2">
-                                ${isActive ? '<i data-lucide="bar-chart-2" class="w-4 h-4 text-blue-500 animate-pulse"></i>' : ''}
-                                <h4 class="text-slate-900 dark:text-white font-medium text-base mb-1 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-1" title="${ep.title}">${ep.title}</h4>
-                            </div>
-                            <div class="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-500 font-mono">
-                                <span>${ep.pubDate.toLocaleDateString()}</span>
-                                <span>•</span>
-                                <span>${formatDurationStr(ep.duration)}</span>
-                            </div>
-                            <p class="text-slate-500 dark:text-slate-400 text-xs mt-2 line-clamp-2">${ep.description}</p>
-                        </div>
-                        
-                        <div class="flex items-center gap-3 w-full sm:w-auto mt-2 sm:mt-0">
-                            <button onclick="toggleLikeEpisode(${i})" class="text-slate-400 hover:text-red-500 p-2 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 transition" title="Like Episode">
-                                <i data-lucide="thumbs-up" class="w-4 h-4 ${isLiked ? 'fill-blue-500 text-blue-500' : ''}"></i>
-                            </button>
-
-                            <button onclick="shareEpisode('${ep.audioUrl}', '${ep.title.replace(/['"]/g, "")}')" class="text-slate-400 hover:text-blue-500 dark:hover:text-blue-400 p-2 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 transition" title="Share Episode">
-                                <i data-lucide="share-2" class="w-4 h-4"></i>
-                            </button>
-
-                            <button onclick="playEpisode(${i})" class="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-white dark:bg-slate-800 hover:bg-blue-600 dark:hover:bg-blue-600 hover:text-white text-slate-700 dark:text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors border border-slate-200 dark:border-slate-600 hover:border-blue-500 dark:hover:border-blue-500 shadow-sm">
-                                <i data-lucide="play" class="w-4 h-4 fill-current"></i> ${isActive ? 'Playing' : 'Play'}
-                            </button>
-                            
-                            <button onclick="downloadEpisode('${ep.audioUrl}', '${ep.title.replace(/['"]/g, '')}', this)" class="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 px-4 py-2 rounded-lg text-sm font-medium transition-colors border border-slate-200 dark:border-slate-600 shadow-sm">
-                                <i data-lucide="download" class="w-4 h-4"></i> <span class="hidden sm:inline">Download</span>
-                            </button>
-                        </div>
-                    </div>
-                `}).join('');
-            }
-
-            lucide.createIcons();
-            window.scrollTo(0,0);
-        }
-
-        function formatDurationStr(str) {
-            if (!str) return '';
-            if (str.includes(':')) return str;
-            const sec = parseInt(str);
-            if (isNaN(sec)) return str;
-            const m = Math.floor(sec / 60);
-            const s = sec % 60;
-            return `${m}:${s.toString().padStart(2, '0')}`;
-        }
-
-        // --- Player Logic ---
-
-        function playEpisode(index) {
-            const ep = state.episodes[index];
-            state.currentEpisodeIndex = index; 
-
-            let played = JSON.parse(localStorage.getItem('playedEpisodes') || '[]');
-            if (!played.includes(ep.audioUrl)) {
-                played.push(ep.audioUrl);
-                localStorage.setItem('playedEpisodes', JSON.stringify(played));
-            }
-
-            const playerImg = document.getElementById('playerImg');
-            const playerTitle = document.getElementById('playerTitle');
-            const playerSub = document.getElementById('playerSub');
+        # ------------------------------------------
+        # STATE: PLAYER 2 AIMING & MOVING (2P MODE)
+        # ------------------------------------------
+        elif state == STATE_P2_AIM:
+            if yellow_pressed and not prev_yellow:
+                p2_preferred_view = VIEW_FULL_MAP if p2_preferred_view == VIEW_ZOOMED_P2 else VIEW_ZOOMED_P2
             
-            playerFooter.classList.remove('translate-y-full');
+            apply_view(p2_preferred_view)
             
-            if (state.currentPodcast) {
-                playerImg.src = state.currentPodcast.artworkUrl600;
-                playerImg.classList.remove('hidden');
-                playerSub.innerText = state.currentPodcast.collectionName;
-            }
+            jx = joy_x.value - CENTER_X
+            if abs(jx) > 4000 and p2_energy > 0:
+                move = -(jx / 32768.0) * 1.5
+                new_x = p2_x + move
+                if 5 < new_x < MAP_W - 20:
+                    dist_moved = abs(new_x - p2_x)
+                    if p2_energy - dist_moved >= 0:
+                        p2_x = new_x
+                        p2_energy -= dist_moved
+                        p2_y = settle_tank(p2_x, 0)
+                        p2_en_bar.width = max(1, int((p2_energy / 50.0) * 50))
             
-            playerTitle.innerText = ep.title;
-            state.audio.src = ep.audioUrl;
-            state.audio.playbackRate = state.playbackRate; 
+            angle = (pot.value / 65535.0) * math.pi
+            p2_barrel.points = get_barrel_pts(angle, BARREL_LENGTH)
             
-            state.audio.onerror = () => {
-                showToast("Cannot play this audio file (Protected)", "alert-octagon");
-                updatePlayBtn();
-            };
-
-            state.audio.play().catch(e => {
-                console.warn("Playback failed", e);
-                showToast("Playback failed. Try downloading.", "alert-triangle");
-            });
+            if blue_pressed:
+                charging = True
+                charge_power += 0.15
+                if charge_power > 12.0: charge_power = 12.0
+                power_bar.width = max(1, int((charge_power / 12.0) * 100))
+                power_bar.y = 20 
             
-            state.isPlaying = true;
-            updatePlayBtn();
-            
-            if (state.currentPodcast) {
-                renderPodcastDetail(state.currentPodcast, null, false, false);
-            }
-        }
-
-        function closePlayer() {
-            state.audio.pause();
-            state.isPlaying = false;
-            updatePlayBtn();
-            const playerFooter = document.getElementById('playerFooter');
-            playerFooter.classList.add('translate-y-full');
-        }
-
-        function togglePlay() {
-            if (state.audio.paused) {
-                state.audio.play();
-                state.isPlaying = true;
-            } else {
-                state.audio.pause();
-                state.isPlaying = false;
-            }
-            updatePlayBtn();
-        }
-
-        function updatePlayBtn() {
-            const btn = document.getElementById('playPauseBtn');
-            const icon = state.isPlaying ? 'pause' : 'play';
-            btn.innerHTML = `<i data-lucide="${icon}" class="w-6 h-6 fill-current"></i>`;
-            lucide.createIcons();
-        }
-
-        function skip(seconds) {
-            state.audio.currentTime += seconds;
-        }
-
-        function toggleSpeed() {
-            const rates = [1.0, 1.25, 1.5, 2.0];
-            const currentIndex = rates.indexOf(state.playbackRate);
-            const nextIndex = (currentIndex + 1) % rates.length;
-            
-            state.playbackRate = rates[nextIndex];
-            state.audio.playbackRate = state.playbackRate;
-            
-            speedBtn.innerText = state.playbackRate + 'x';
-        }
-
-        function toggleSleepTimer() {
-            const cycles = [0, 15, 30, 60];
-            const currentIndex = cycles.indexOf(state.sleepMinutes);
-            const nextIndex = (currentIndex + 1) % cycles.length;
-            state.sleepMinutes = cycles[nextIndex];
-
-            if (state.sleepTimer) {
-                clearTimeout(state.sleepTimer);
-                state.sleepTimer = null;
-            }
-
-            const btnIcon = sleepBtn.querySelector('i');
-
-            if (state.sleepMinutes > 0) {
-                sleepBtn.innerHTML = `<span class="text-xs font-mono">${state.sleepMinutes}m</span>`;
-                showToast(`Sleep timer set for ${state.sleepMinutes} minutes`, 'moon');
+            elif charging and not blue_pressed:
+                sh_x = p2_x + TANK_W/2
+                sh_y = p2_y - 2
+                sh_vx = math.cos(angle) * charge_power
+                sh_vy = -math.sin(angle) * charge_power
+                active_shooter = 2
+                state = STATE_SHELL_FLY
+                apply_view(VIEW_FULL_MAP)
                 
-                state.sleepTimer = setTimeout(() => {
-                    state.audio.pause();
-                    state.isPlaying = false;
-                    updatePlayBtn();
-                    showToast("Sleep timer: Playback stopped", "moon");
-                    state.sleepMinutes = 0;
-                    sleepBtn.innerHTML = `<i data-lucide="moon" class="w-4 h-4"></i>`;
-                    lucide.createIcons();
-                }, state.sleepMinutes * 60 * 1000);
+                charging = False
+                charge_power = 0.0
+                power_bar.y = -10 
+                status_label.text = "FIRE!"
 
-            } else {
-                sleepBtn.innerHTML = `<i data-lucide="moon" class="w-4 h-4"></i>`;
-                lucide.createIcons();
-                showToast("Sleep timer disabled", "x");
-            }
-        }
-
-        function shareEpisode(url, title) {
-            const textToShare = `Check out this podcast episode: "${title}" - ${url}`;
-            const tempInput = document.createElement("input");
-            tempInput.value = textToShare;
-            document.body.appendChild(tempInput);
-            tempInput.select();
-            document.execCommand("copy");
-            document.body.removeChild(tempInput);
-            showToast("Link copied to clipboard!", "link");
-        }
-
-        function setVolume(val) {
-            const volumeValue = val !== undefined ? val : document.getElementById('volSlider').value;
-            const volume = volumeValue / 100;
-            state.audio.volume = volume;
-            localStorage.setItem('playerVolume', volume);
-        }
-
-        function seekAudio() {
-            const slider = document.getElementById('seekSlider');
-            const seekTo = state.audio.duration * (slider.value / 100);
-            state.audio.currentTime = seekTo;
-        }
-
-        state.audio.ontimeupdate = () => {
-            const slider = document.getElementById('seekSlider');
-            const curr = document.getElementById('currTime');
-            const dur = document.getElementById('durTime');
+        # ------------------------------------------
+        # STATE: AI THINKING & MOVING (1P MODE)
+        # ------------------------------------------
+        elif state == STATE_AI_THINK:
+            apply_view(VIEW_ZOOMED_P2)
+            ai_timer -= 1
             
-            const pct = (state.audio.currentTime / state.audio.duration) * 100;
-            if(!isNaN(pct)) slider.value = pct;
+            if abs(p2_x - ai_target_x) > 1.0:
+                p2_dir = 1.0 if ai_target_x > p2_x else -1.0
+                p2_x += p2_dir * 0.8
+                p2_y = settle_tank(p2_x, 0)
+            
+            dx = p1_x - p2_x
+            dy = p1_y - p2_y
+            dist = abs(dx)
+            
+            if abs(p1_x - ai_last_p1_x) > 20:
+                ai_error = 2.5
+                ai_last_p1_x = p1_x
+            
+            ai_angle = math.pi - (math.pi/4) if dx < 0 else (math.pi/4)
+            p2_barrel.points = get_barrel_pts(ai_angle, BARREL_LENGTH)
+            
+            if ai_timer <= 0:
+                sh_x = p2_x + TANK_W/2
+                sh_y = p2_y - 2
+                
+                denom = dist + dy
+                if denom > 1.0:
+                    req_power = math.sqrt((GRAVITY * dist * dist) / denom)
+                else:
+                    req_power = math.sqrt(dist * GRAVITY)
+                
+                req_power += random.uniform(-ai_error, ai_error)
+                if req_power > 13.0: req_power = 13.0
+                if req_power < 2.0: req_power = 2.0
+                
+                ai_error *= 0.75 
+                
+                sh_vx = math.cos(ai_angle) * req_power
+                sh_vy = -math.sin(ai_angle) * req_power
+                active_shooter = 2
+                state = STATE_SHELL_FLY
+                apply_view(VIEW_FULL_MAP)
+                status_label.text = "INCOMING!"
 
-            curr.innerText = formatTime(state.audio.currentTime);
-            if (!isNaN(state.audio.duration)) {
-                dur.innerText = formatTime(state.audio.duration);
-            }
-        };
+        # ------------------------------------------
+        # STATE: SHELL FLYING
+        # ------------------------------------------
+        elif state == STATE_SHELL_FLY:
+            apply_view(VIEW_FULL_MAP)
+            sh_vy += GRAVITY
+            sh_x += sh_vx
+            sh_y += sh_vy
+            
+            shell.x = int(sh_x)
+            shell.y = int(sh_y)
+            
+            if sh_x < 0 or sh_x > MAP_W or sh_y > LOGICAL_H:
+                state = STATE_MAP_OVERVIEW
+                overview_timer = 20
+                if active_shooter == 1:
+                    next_state_after_overview = STATE_P2_AIM if is_2player else STATE_AI_THINK
+                else:
+                    next_state_after_overview = STATE_P1_AIM
+                status_label.text = "MISSED!"
+                shell.x = -10
+            
+            elif sh_y > 0:
+                ix, iy = int(sh_x), int(sh_y)
+                if terrain_bmp[ix, iy] == 1:
+                    explosion.x = ix
+                    explosion.y = iy
+                    carve_crater(ix, iy, exp_radius)
+                    shell.x = -10
+                    exp_timer = 12 
+                    
+                    dmg_to_p2 = calc_damage(p2_x, p2_y, ix, iy)
+                    dmg_to_p1 = calc_damage(p1_x, p1_y, ix, iy)
+                    
+                    p2_hp -= dmg_to_p2
+                    p1_hp -= dmg_to_p1
+                    
+                    if dmg_to_p2 > 0 or dmg_to_p1 > 0:
+                        status_label.text = "DIRECT HIT!"
+
+        # ------------------------------------------
+        # STATE: GAME OVER
+        # ------------------------------------------
+        elif state == STATE_GAME_OVER:
+            if blue_pressed and not prev_blue:
+                generate_terrain()
+                p1_x = random.randint(20, 80)
+                p2_x = random.randint(MAP_W - 100, MAP_W - 40)
+                p1_y = settle_tank(p1_x, 0)
+                p2_y = settle_tank(p2_x, 0)
+                
+                p1_hp = 100
+                p2_hp = 100
+                p1_energy = 50.0
+                p2_energy = 50.0
+                ai_error = 2.5
+                ai_last_p1_x = p1_x
+                
+                p1_hp_bar.width = 50
+                p2_hp_bar.width = 50
+                p1_en_bar.width = 50
+                p2_en_bar.width = 50
+                
+                if "DEFEATED" in status_label.text or "P2 WINS" in status_label.text:
+                    score = 0
+                    score_label.text = "SCORE: 0"
+                
+                state = STATE_P1_AIM
+                p1_preferred_view = VIEW_ZOOMED_P1
+                apply_view(VIEW_ZOOMED_P1)
+                status_label.text = "P1 TURN"
+
+        prev_blue = blue_pressed
+        prev_yellow = yellow_pressed
+        prev_joy = joy_pressed
+
+        p1_body.x = int(p1_x)
+        p1_body.y = int(p1_y)
+        p1_barrel.x = int(p1_x)
+        p1_barrel.y = int(p1_y)
         
-        state.audio.onended = () => {
-            state.isPlaying = false;
-            updatePlayBtn();
-        };
+        p2_body.x = int(p2_x)
+        p2_body.y = int(p2_y)
+        p2_barrel.x = int(p2_x)
+        p2_barrel.y = int(p2_y)
 
-        function formatTime(s) {
-            const mins = Math.floor(s / 60);
-            const secs = Math.floor(s % 60);
-            return `${mins}:${secs.toString().padStart(2, '0')}`;
-        }
+        display.refresh(target_frames_per_second=40)
 
-        // --- Download Logic ---
-
-        async function downloadEpisode(url, filename, btn) {
-            const originalText = btn.innerHTML;
-            btn.innerHTML = `<div class="loader w-4 h-4 border-2"></div>`;
-            btn.disabled = true;
-
-            try {
-                try {
-                    const response = await fetch(url);
-                    if (!response.ok) throw new Error('Direct fetch failed');
-                    const blob = await response.blob();
-                    const blobUrl = window.URL.createObjectURL(blob);
-                    triggerDownload(blobUrl, filename + '.mp3');
-                    showToast('Download started!', 'check-circle');
-                } catch (directError) {
-                    const tempLink = document.createElement('a');
-                    tempLink.href = url;
-                    tempLink.target = '_blank';
-                    tempLink.download = filename + '.mp3'; 
-                    document.body.appendChild(tempLink);
-                    tempLink.click();
-                    document.body.removeChild(tempLink);
-                    showToast('Opening download link...', 'external-link');
-                }
-            } catch (error) {
-                showToast('Download failed. Try playing instead.', 'x-circle');
-            } finally {
-                setTimeout(() => {
-                    btn.innerHTML = originalText;
-                    btn.disabled = false;
-                    lucide.createIcons();
-                }, 2000);
-            }
-        }
-
-        function triggerDownload(url, name) {
-            const a = document.createElement('a');
-            a.style.display = 'none';
-            a.href = url;
-            a.download = name;
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(url);
-            document.body.removeChild(a);
-        }
-
-        // --- Utilities ---
-
-        function showToast(msg, iconName) {
-            const toast = document.getElementById('toast');
-            const msgEl = document.getElementById('toastMsg');
-            const iconEl = document.getElementById('toastIcon');
-            
-            msgEl.innerText = msg;
-            iconEl.setAttribute('data-lucide', iconName);
-            lucide.createIcons();
-
-            toast.classList.remove('translate-y-20', 'opacity-0');
-            setTimeout(() => {
-                toast.classList.add('translate-y-20', 'opacity-0');
-            }, 3000);
-        }
-    </script>
-</body>
-</html>
+main()
