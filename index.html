@@ -1,619 +1,243 @@
-import time
-import random
-import math
-import gc
-import board
-import busio
-import displayio
-import fourwire
-import analogio
-import digitalio
-import terminalio
-import supervisor
-import vectorio
-from adafruit_display_text import label
-from circuitpython_st7796s import ST7796S
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pico W Serial Console</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: #121212;
+            color: #e0e0e0;
+            padding: 20px;
+            margin: 0;
+        }
+        .container {
+            max-width: 850px;
+            margin: 0 auto;
+        }
+        .toolbar {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+            background: #1e1e1e;
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid #333;
+        }
+        select, input, button {
+            background-color: #2a2a2a;
+            color: #fff;
+            border: 1px solid #444;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        button {
+            cursor: pointer;
+            font-weight: bold;
+            background-color: #00a86b;
+            border: none;
+        }
+        button:hover { background-color: #008f5a; }
+        button:disabled {
+            background-color: #333;
+            color: #777;
+            cursor: not-allowed;
+        }
+        #disconnectBtn { background-color: #cf6679; }
+        #disconnectBtn:hover { background-color: #b13c50; }
+        #console {
+            background-color: #050505;
+            border: 1px solid #333;
+            height: 450px;
+            overflow-y: auto;
+            padding: 15px;
+            font-family: "Fira Code", "Courier New", Courier, monospace;
+            font-size: 14px;
+            white-space: pre-wrap;
+            box-sizing: border-box;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            color: #00ff66;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.8);
+        }
+        .input-area {
+            display: flex;
+            gap: 10px;
+        }
+        .input-area input { flex-grow: 1; background: #1e1e1e; border-color: #444; }
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 14px;
+        }
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background-color: #cf6679;
+        }
+        .status-dot.connected { background-color: #00a86b; }
+    </style>
+</head>
+<body>
 
-# ==========================================
-# HARDWARE SETUP
-# ==========================================
-displayio.release_displays()
-spi = busio.SPI(clock=board.GP2, MOSI=board.GP3)
-while not spi.try_lock():
-    pass
-spi.configure(baudrate=60000000)
-spi.unlock()
-
-display_bus = fourwire.FourWire(spi, command=board.GP5, chip_select=board.GP1, reset=board.GP6, baudrate=60000000)
-display = ST7796S(display_bus, width=480, height=320, rotation=0)
-display.auto_refresh = False
-
-def main():
-    root = displayio.Group(scale=2)
-    LOGICAL_W = 240
-    LOGICAL_H = 160
-    MAP_W = 480  
-
-    world_group = displayio.Group()
-    ui_group = displayio.Group()
+<div class="container">
+    <h2>Raspberry Pi Pico W Serial Console</h2>
     
-    root.append(world_group)
-    root.append(ui_group)
+    <div class="toolbar">
+        <label for="baudrate">Baud Rate:</label>
+        <select id="baudrate">
+            <option value="115200" selected>115200 (Pico Default)</option>
+            <option value="9600">9600</option>
+        </select>
 
-    # ==========================================
-    # PALETTES
-    # ==========================================
-    terrain_pal = displayio.Palette(2)
-    terrain_pal[0] = 0x4488FF 
-    terrain_pal[1] = 0x228B22 
+        <label for="lineEnding">Line Ending:</label>
+        <select id="lineEnding">
+            <option value="\r\n" selected>CRLF (\r\n)</option>
+            <option value="\n">LF (\n)</option>
+            <option value="\r">CR (\r)</option>
+            <option value="">None</option>
+        </select>
 
-    tank_pal = displayio.Palette(1)
-    tank_pal[0] = 0xCCCCCC 
-    
-    enemy_pal = displayio.Palette(1)
-    enemy_pal[0] = 0xFF2222 
-
-    ui_pal = displayio.Palette(1)
-    ui_pal[0] = 0xFFFFFF 
-    
-    exp_pal = displayio.Palette(1)
-    exp_pal[0] = 0xFF8800 
-
-    hp_green_pal = displayio.Palette(1)
-    hp_green_pal[0] = 0x00FF00
-    
-    energy_blue_pal = displayio.Palette(1)
-    energy_blue_pal[0] = 0x00AAFF
-
-    # ==========================================
-    # SCENE GRAPH (WORLD)
-    # ==========================================
-    terrain_bmp = displayio.Bitmap(MAP_W, LOGICAL_H, 2)
-    terrain_grid = displayio.TileGrid(terrain_bmp, pixel_shader=terrain_pal)
-    world_group.append(terrain_grid)
-
-    TANK_W = 10
-    TANK_H = 6
-    BARREL_LENGTH = 24  # Doubled from 12 to 24
-    
-    p1_body = vectorio.Rectangle(pixel_shader=tank_pal, width=TANK_W, height=TANK_H, x=0, y=0)
-    p1_barrel = vectorio.Polygon(pixel_shader=tank_pal, points=[(0,0), (0,0), (0,0)])
-    
-    p2_body = vectorio.Rectangle(pixel_shader=enemy_pal, width=TANK_W, height=TANK_H, x=0, y=0)
-    p2_barrel = vectorio.Polygon(pixel_shader=enemy_pal, points=[(0,0), (0,0), (0,0)])
-
-    world_group.append(p1_body)
-    world_group.append(p1_barrel)
-    world_group.append(p2_body)
-    world_group.append(p2_barrel)
-
-    shell = vectorio.Rectangle(pixel_shader=ui_pal, width=2, height=2, x=-10, y=-10)
-    world_group.append(shell)
-
-    exp_radius = 16
-    exp_points = []
-    for i in range(12):
-        angle = (i / 12) * math.pi * 2
-        exp_points.append((int(math.cos(angle)*exp_radius), int(math.sin(angle)*exp_radius)))
-    explosion = vectorio.Polygon(pixel_shader=exp_pal, points=exp_points, x=-50, y=-50)
-    world_group.append(explosion)
-
-    # ==========================================
-    # SCENE GRAPH (UI)
-    # ==========================================
-    power_bar = vectorio.Rectangle(pixel_shader=ui_pal, width=1, height=4, x=96, y=-10)
-    ui_group.append(power_bar)
-    
-    p1_hp_bar = vectorio.Rectangle(pixel_shader=hp_green_pal, width=50, height=4, x=5, y=5)
-    p2_hp_bar = vectorio.Rectangle(pixel_shader=enemy_pal, width=50, height=4, x=LOGICAL_W-55, y=5)
-    p1_en_bar = vectorio.Rectangle(pixel_shader=energy_blue_pal, width=50, height=3, x=5, y=11)
-    p2_en_bar = vectorio.Rectangle(pixel_shader=energy_blue_pal, width=50, height=3, x=LOGICAL_W-55, y=11)
-    
-    ui_group.append(p1_hp_bar)
-    ui_group.append(p2_hp_bar)
-    ui_group.append(p1_en_bar)
-    ui_group.append(p2_en_bar)
-
-    score_label = label.Label(terminalio.FONT, text="SCORE: 0", color=0xFFFFFF, x=90, y=10)
-    status_label = label.Label(terminalio.FONT, text="SCORCHED PICO", color=0xFFFF00, x=70, y=25)
-    ui_group.append(score_label)
-    ui_group.append(status_label)
-
-    display.root_group = root
-
-    # ==========================================
-    # CONTROLS
-    # ==========================================
-    joy_x = analogio.AnalogIn(board.GP26)
-    pot = analogio.AnalogIn(board.GP28)
-    
-    blue_btn = digitalio.DigitalInOut(board.GP14)
-    blue_btn.direction = digitalio.Direction.INPUT
-    blue_btn.pull = digitalio.Pull.UP
-    
-    red_btn = digitalio.DigitalInOut(board.GP15)
-    red_btn.direction = digitalio.Direction.INPUT
-    red_btn.pull = digitalio.Pull.UP
-
-    yellow_btn = digitalio.DigitalInOut(board.GP13)
-    yellow_btn.direction = digitalio.Direction.INPUT
-    yellow_btn.pull = digitalio.Pull.UP
-
-    joy_btn = digitalio.DigitalInOut(board.GP16)
-    joy_btn.direction = digitalio.Direction.INPUT
-    joy_btn.pull = digitalio.Pull.UP
-
-    sum_x = 0
-    for _ in range(10): sum_x += joy_x.value
-    CENTER_X = sum_x // 10
-
-    # ==========================================
-    # LOGIC FUNCTIONS
-    # ==========================================
-    def generate_terrain():
-        for x in range(MAP_W):
-            for y in range(LOGICAL_H):
-                terrain_bmp[x, y] = 0
-                
-        offset1 = random.uniform(20.0, 50.0)
-        offset2 = random.uniform(30.0, 70.0)
-        base_h = random.randint(80, 120)
+        <button id="connectBtn">Connect</button>
+        <button id="disconnectBtn" disabled>Disconnect</button>
         
-        for x in range(MAP_W):
-            h = base_h + int(math.sin(x/offset1)*20 + math.cos(x/offset2)*30)
-            if h < 40: h = 40
-            if h > 150: h = 150
-            for y in range(h, LOGICAL_H):
-                terrain_bmp[x, y] = 1
+        <div class="status">
+            <div id="statusDot" class="status-dot"></div>
+            <span id="statusText">Disconnected</span>
+        </div>
+    </div>
 
-    def settle_tank(tx, ty):
-        while ty < LOGICAL_H - TANK_H:
-            if terrain_bmp[int(tx + TANK_W/2), int(ty + TANK_H)] == 1:
-                break
-            ty += 1
-        return ty
+    <div id="console"></div>
 
-    def carve_crater(cx, cy, r):
-        for dx in range(-r, r+1):
-            for dy in range(-r, r+1):
-                if dx*dx + dy*dy <= r*r:
-                    nx, ny = int(cx + dx), int(cy + dy)
-                    if 0 <= nx < MAP_W and 0 <= ny < LOGICAL_H:
-                        terrain_bmp[nx, ny] = 0
+    <div class="input-area">
+        <input type="text" id="cmdInput" placeholder="Type microphython command or input here..." disabled />
+        <button id="sendBtn" disabled>Send</button>
+        <button id="clearBtn">Clear</button>
+    </div>
+</div>
 
-    def get_barrel_pts(angle, length=24):
-        cx, cy = TANK_W // 2, -2
-        ex, ey = cx + int(math.cos(angle) * length), cy - int(math.sin(angle) * length)
-        # Doubled barrel thickness width (-2 to +2 instead of -1 to +1)
-        return [(cx, cy - 2), (ex, ey), (cx, cy + 2)]
+<script>
+    let port;
+    let reader;
+    const consoleDiv = document.getElementById('console');
+    const connectBtn = document.getElementById('connectBtn');
+    const disconnectBtn = document.getElementById('disconnectBtn');
+    const sendBtn = document.getElementById('sendBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const cmdInput = document.getElementById('cmdInput');
+    const baudrateSelect = document.getElementById('baudrate');
+    const lineEndingSelect = document.getElementById('lineEnding');
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
 
-    def calc_damage(tx, ty, cx, cy):
-        dist = math.sqrt((tx+TANK_W/2 - cx)**2 + (ty+TANK_H/2 - cy)**2)
-        if dist < exp_radius + TANK_W:
-            return int((exp_radius + TANK_W - dist) * 2.0)
-        return 0
+    function logToConsole(text) {
+        consoleDiv.textContent += text;
+        consoleDiv.scrollTop = consoleDiv.scrollHeight; 
+    }
 
-    # ==========================================
-    # VIEW SYSTEM
-    # ==========================================
-    VIEW_ZOOMED_P1 = 0
-    VIEW_ZOOMED_P2 = 1
-    VIEW_FULL_MAP = 2
-    current_view = -1
-
-    def apply_view(view):
-        nonlocal current_view
-        if current_view == view and view not in (VIEW_ZOOMED_P1, VIEW_ZOOMED_P2):
-            return
-        current_view = view
+    function updateUI(connected) {
+        connectBtn.disabled = connected;
+        baudrateSelect.disabled = connected;
+        disconnectBtn.disabled = !connected;
+        cmdInput.disabled = !connected;
+        sendBtn.disabled = !connected;
         
-        if view == VIEW_ZOOMED_P1:
-            root.scale = 2
-            cam = p1_x - (LOGICAL_W / 2)
-            if cam < 0: cam = 0
-            if cam > MAP_W - LOGICAL_W: cam = MAP_W - LOGICAL_W
-            world_group.x = -int(cam)
-            world_group.y = 0
-            p1_hp_bar.x = 5
-            p1_hp_bar.y = 5
-            p2_hp_bar.x = LOGICAL_W - 55
-            p2_hp_bar.y = 5
-            p1_en_bar.x = 5
-            p1_en_bar.y = 11
-            p2_en_bar.x = LOGICAL_W - 55
-            p2_en_bar.y = 11
-            score_label.x = 90
-            score_label.y = 10
-            status_label.x = 65
-            status_label.y = 25
-        elif view == VIEW_ZOOMED_P2:
-            root.scale = 2
-            cam = p2_x - (LOGICAL_W / 2)
-            if cam < 0: cam = 0
-            if cam > MAP_W - LOGICAL_W: cam = MAP_W - LOGICAL_W
-            world_group.x = -int(cam)
-            world_group.y = 0
-            p1_hp_bar.x = 5
-            p1_hp_bar.y = 5
-            p2_hp_bar.x = LOGICAL_W - 55
-            p2_hp_bar.y = 5
-            p1_en_bar.x = 5
-            p1_en_bar.y = 11
-            p2_en_bar.x = LOGICAL_W - 55
-            p2_en_bar.y = 11
-            score_label.x = 90
-            score_label.y = 10
-            status_label.x = 65
-            status_label.y = 25
-        elif view == VIEW_FULL_MAP:
-            root.scale = 1
-            world_group.x = 0
-            world_group.y = 80
-            p1_hp_bar.x = 10
-            p1_hp_bar.y = 10
-            p2_hp_bar.x = 480 - 65
-            p2_hp_bar.y = 10
-            p1_en_bar.x = 10
-            p1_en_bar.y = 22
-            p2_en_bar.x = 480 - 65
-            p2_en_bar.y = 22
-            score_label.x = 200
-            score_label.y = 20
-            status_label.x = 150
-            status_label.y = 45
+        if (connected) {
+            statusDot.classList.add('connected');
+            statusText.textContent = "Connected";
+            cmdInput.focus();
+        } else {
+            statusDot.classList.remove('connected');
+            statusText.textContent = "Disconnected";
+        }
+    }
 
-    # ==========================================
-    # GAME STATE
-    # ==========================================
-    STATE_P1_AIM = 0
-    STATE_P2_AIM = 1
-    STATE_SHELL_FLY = 2
-    STATE_AI_THINK = 3
-    STATE_GAME_OVER = 4
-    STATE_MAP_OVERVIEW = 5
+    async function readFromPort() {
+        try {
+            while (port.readable) {
+                reader = port.readable.getReader();
+                const decoder = new TextDecoder();
+                try {
+                    while (true) {
+                        const { value, done } = await reader.read();
+                        if (done) break;
+                        if (value) {
+                            logToConsole(decoder.decode(value));
+                        }
+                    }
+                } catch (error) {
+                    console.error("Read error:", error);
+                } finally {
+                    reader.releaseLock();
+                }
+            }
+        } catch (error) {
+            console.error("Exit stream loop:", error);
+        }
+    }
 
-    state = STATE_P1_AIM
-    score = 0
-    is_2player = False
-    
-    p1_hp = 100
-    p2_hp = 100
-    p1_energy = 50.0
-    p2_energy = 50.0
-    
-    p1_x, p1_y = 40.0, 0.0
-    p2_x, p2_y = float(MAP_W - 60), 0.0
-    
-    sh_x, sh_y = 0.0, 0.0
-    sh_vx, sh_vy = 0.0, 0.0
-    active_shooter = 1 
-    
-    charge_power = 0.0
-    charging = False
-    prev_blue = False
-    prev_yellow = False
-    prev_joy = False
-    
-    p1_preferred_view = VIEW_ZOOMED_P1
-    p2_preferred_view = VIEW_ZOOMED_P2
-    
-    ai_timer = 0
-    ai_target_x = p2_x
-    exp_timer = 0
-    overview_timer = 0
-    next_state_after_overview = STATE_P1_AIM
-    
-    ai_error = 2.5
-    ai_last_p1_x = p1_x
+    connectBtn.addEventListener('click', async () => {
+        if (!('serial' in navigator)) {
+            alert('Web Serial API not supported! Ensure you are using Google Chrome or Microsoft Edge.');
+            return;
+        }
 
-    generate_terrain()
-    p1_y = settle_tank(p1_x, 50)
-    p2_y = settle_tank(p2_x, 50)
-    status_label.text = "P1 TURN"
-    apply_view(VIEW_ZOOMED_P1)
-    gc.collect()
+        try {
+            port = await navigator.serial.requestPort();
+            const baudRate = parseInt(baudrateSelect.value);
+            // standard configurations for Pico hardware bridges
+            await port.open({ baudRate, dataBits: 8, stopBits: 1, parity: "none", flowControl: "none" });
+            
+            updateUI(true);
+            readFromPort();
+        } catch (err) {
+            console.error(err);
+            alert('Could not connect. Ensure your IDE (like Thonny) is completely closed so it releases the COM port.');
+        }
+    });
 
-    while True:
-        if not red_btn.value:
-            supervisor.set_next_code_file("code.py")
-            supervisor.reload()
+    async function disconnect() {
+        if (reader) {
+            await reader.cancel();
+        }
+        if (port) {
+            await port.close();
+        }
+        updateUI(false);
+    }
 
-        blue_pressed = not blue_btn.value
-        yellow_pressed = not yellow_btn.value
-        joy_pressed = not joy_btn.value
-        GRAVITY = 0.15
+    disconnectBtn.addEventListener('click', disconnect);
 
-        # Toggle 2-Player mode by pressing Joystick Click
-        if joy_pressed and not prev_joy:
-            is_2player = not is_2player
-            if is_2player:
-                status_label.text = "2-PLAYER MODE"
-            else:
-                status_label.text = "1-PLAYER MODE"
+    async function sendData() {
+        const text = cmdInput.value;
+        if (!port || !port.writable) return;
 
-        # ------------------------------------------
-        # EXPLOSION ANIMATION
-        # ------------------------------------------
-        if exp_timer > 0:
-            exp_timer -= 1
-            if exp_timer == 0:
-                explosion.x = -50 
-                p1_y = settle_tank(p1_x, p1_y)
-                p2_y = settle_tank(p2_x, p2_y)
-                
-                # Update Bars
-                p1_hp_bar.width = max(1, int((p1_hp / 100.0) * 50))
-                p2_hp_bar.width = max(1, int((p2_hp / 100.0) * 50))
-                
-                if state == STATE_GAME_OVER:
-                    pass
-                elif p1_hp <= 0 or p1_y >= LOGICAL_H - TANK_H:
-                    status_label.text = "P2 WINS! BLUE RSTRT" if is_2player else "DEFEATED! BLUE RSTRT"
-                    state = STATE_GAME_OVER
-                elif p2_hp <= 0 or p2_y >= LOGICAL_H - TANK_H:
-                    status_label.text = "P1 WINS! BLUE RSTRT" if is_2player else "ENEMY DESTROYED!"
-                    score += 1
-                    score_label.text = f"SCORE: {score}"
-                    state = STATE_GAME_OVER
-                else:
-                    state = STATE_MAP_OVERVIEW
-                    overview_timer = 30
-                    if active_shooter == 1:
-                        next_state_after_overview = STATE_P2_AIM if is_2player else STATE_AI_THINK
-                    else:
-                        next_state_after_overview = STATE_P1_AIM
-            
-            display.refresh(target_frames_per_second=40)
-            continue
+        let ending = lineEndingSelect.value;
+        // Parse literal string translations 
+        if (ending === "\\r\\n") ending = "\r\n";
+        if (ending === "\\n") ending = "\n";
+        if (ending === "\\r") ending = "\r";
 
-        # ------------------------------------------
-        # STATE: MAP OVERVIEW TRANSITION
-        # ------------------------------------------
-        if state == STATE_MAP_OVERVIEW:
-            apply_view(VIEW_FULL_MAP)
-            overview_timer -= 1
-            if overview_timer <= 0:
-                state = next_state_after_overview
-                if state == STATE_AI_THINK:
-                    apply_view(VIEW_ZOOMED_P2)
-                    ai_timer = 35
-                    ai_target_x = p2_x + random.uniform(-30, 30)
-                    if ai_target_x < MAP_W - 160: ai_target_x = MAP_W - 160
-                    if ai_target_x > MAP_W - 25: ai_target_x = MAP_W - 25
-                    status_label.text = "AI AIMING..."
-                elif state == STATE_P2_AIM:
-                    apply_view(p2_preferred_view)
-                    p2_energy = 50.0
-                    p2_en_bar.width = 50
-                    status_label.text = "PASS TO P2!"
-                elif state == STATE_P1_AIM:
-                    apply_view(p1_preferred_view)
-                    p1_energy = 50.0
-                    p1_en_bar.width = 50
-                    status_label.text = "PASS TO P1!" if is_2player else "P1 TURN"
-
-        # ------------------------------------------
-        # STATE: PLAYER 1 AIMING & MOVING
-        # ------------------------------------------
-        elif state == STATE_P1_AIM:
-            if yellow_pressed and not prev_yellow:
-                p1_preferred_view = VIEW_FULL_MAP if p1_preferred_view == VIEW_ZOOMED_P1 else VIEW_ZOOMED_P1
-            
-            apply_view(p1_preferred_view)
-            
-            jx = joy_x.value - CENTER_X
-            if abs(jx) > 4000 and p1_energy > 0:
-                move = -(jx / 32768.0) * 1.5
-                new_x = p1_x + move
-                if 5 < new_x < MAP_W - 20:
-                    dist_moved = abs(new_x - p1_x)
-                    if p1_energy - dist_moved >= 0:
-                        p1_x = new_x
-                        p1_energy -= dist_moved
-                        p1_y = settle_tank(p1_x, 0)
-                        p1_en_bar.width = max(1, int((p1_energy / 50.0) * 50))
-            
-            angle = (pot.value / 65535.0) * math.pi
-            p1_barrel.points = get_barrel_pts(angle, BARREL_LENGTH)
-            
-            if blue_pressed:
-                charging = True
-                charge_power += 0.15
-                if charge_power > 12.0: charge_power = 12.0
-                power_bar.width = max(1, int((charge_power / 12.0) * 100))
-                power_bar.y = 20 
-            
-            elif charging and not blue_pressed:
-                sh_x = p1_x + TANK_W/2
-                sh_y = p1_y - 2
-                sh_vx = math.cos(angle) * charge_power
-                sh_vy = -math.sin(angle) * charge_power
-                active_shooter = 1
-                state = STATE_SHELL_FLY
-                apply_view(VIEW_FULL_MAP)
-                
-                charging = False
-                charge_power = 0.0
-                power_bar.y = -10 
-                status_label.text = "FIRE!"
-
-        # ------------------------------------------
-        # STATE: PLAYER 2 AIMING & MOVING (2P MODE)
-        # ------------------------------------------
-        elif state == STATE_P2_AIM:
-            if yellow_pressed and not prev_yellow:
-                p2_preferred_view = VIEW_FULL_MAP if p2_preferred_view == VIEW_ZOOMED_P2 else VIEW_ZOOMED_P2
-            
-            apply_view(p2_preferred_view)
-            
-            jx = joy_x.value - CENTER_X
-            if abs(jx) > 4000 and p2_energy > 0:
-                move = -(jx / 32768.0) * 1.5
-                new_x = p2_x + move
-                if 5 < new_x < MAP_W - 20:
-                    dist_moved = abs(new_x - p2_x)
-                    if p2_energy - dist_moved >= 0:
-                        p2_x = new_x
-                        p2_energy -= dist_moved
-                        p2_y = settle_tank(p2_x, 0)
-                        p2_en_bar.width = max(1, int((p2_energy / 50.0) * 50))
-            
-            angle = (pot.value / 65535.0) * math.pi
-            p2_barrel.points = get_barrel_pts(angle, BARREL_LENGTH)
-            
-            if blue_pressed:
-                charging = True
-                charge_power += 0.15
-                if charge_power > 12.0: charge_power = 12.0
-                power_bar.width = max(1, int((charge_power / 12.0) * 100))
-                power_bar.y = 20 
-            
-            elif charging and not blue_pressed:
-                sh_x = p2_x + TANK_W/2
-                sh_y = p2_y - 2
-                sh_vx = math.cos(angle) * charge_power
-                sh_vy = -math.sin(angle) * charge_power
-                active_shooter = 2
-                state = STATE_SHELL_FLY
-                apply_view(VIEW_FULL_MAP)
-                
-                charging = False
-                charge_power = 0.0
-                power_bar.y = -10 
-                status_label.text = "FIRE!"
-
-        # ------------------------------------------
-        # STATE: AI THINKING & MOVING (1P MODE)
-        # ------------------------------------------
-        elif state == STATE_AI_THINK:
-            apply_view(VIEW_ZOOMED_P2)
-            ai_timer -= 1
-            
-            if abs(p2_x - ai_target_x) > 1.0:
-                p2_dir = 1.0 if ai_target_x > p2_x else -1.0
-                p2_x += p2_dir * 0.8
-                p2_y = settle_tank(p2_x, 0)
-            
-            dx = p1_x - p2_x
-            dy = p1_y - p2_y
-            dist = abs(dx)
-            
-            if abs(p1_x - ai_last_p1_x) > 20:
-                ai_error = 2.5
-                ai_last_p1_x = p1_x
-            
-            ai_angle = math.pi - (math.pi/4) if dx < 0 else (math.pi/4)
-            p2_barrel.points = get_barrel_pts(ai_angle, BARREL_LENGTH)
-            
-            if ai_timer <= 0:
-                sh_x = p2_x + TANK_W/2
-                sh_y = p2_y - 2
-                
-                denom = dist + dy
-                if denom > 1.0:
-                    req_power = math.sqrt((GRAVITY * dist * dist) / denom)
-                else:
-                    req_power = math.sqrt(dist * GRAVITY)
-                
-                req_power += random.uniform(-ai_error, ai_error)
-                if req_power > 13.0: req_power = 13.0
-                if req_power < 2.0: req_power = 2.0
-                
-                ai_error *= 0.75 
-                
-                sh_vx = math.cos(ai_angle) * req_power
-                sh_vy = -math.sin(ai_angle) * req_power
-                active_shooter = 2
-                state = STATE_SHELL_FLY
-                apply_view(VIEW_FULL_MAP)
-                status_label.text = "INCOMING!"
-
-        # ------------------------------------------
-        # STATE: SHELL FLYING
-        # ------------------------------------------
-        elif state == STATE_SHELL_FLY:
-            apply_view(VIEW_FULL_MAP)
-            sh_vy += GRAVITY
-            sh_x += sh_vx
-            sh_y += sh_vy
-            
-            shell.x = int(sh_x)
-            shell.y = int(sh_y)
-            
-            if sh_x < 0 or sh_x > MAP_W or sh_y > LOGICAL_H:
-                state = STATE_MAP_OVERVIEW
-                overview_timer = 20
-                if active_shooter == 1:
-                    next_state_after_overview = STATE_P2_AIM if is_2player else STATE_AI_THINK
-                else:
-                    next_state_after_overview = STATE_P1_AIM
-                status_label.text = "MISSED!"
-                shell.x = -10
-            
-            elif sh_y > 0:
-                ix, iy = int(sh_x), int(sh_y)
-                if terrain_bmp[ix, iy] == 1:
-                    explosion.x = ix
-                    explosion.y = iy
-                    carve_crater(ix, iy, exp_radius)
-                    shell.x = -10
-                    exp_timer = 12 
-                    
-                    dmg_to_p2 = calc_damage(p2_x, p2_y, ix, iy)
-                    dmg_to_p1 = calc_damage(p1_x, p1_y, ix, iy)
-                    
-                    p2_hp -= dmg_to_p2
-                    p1_hp -= dmg_to_p1
-                    
-                    if dmg_to_p2 > 0 or dmg_to_p1 > 0:
-                        status_label.text = "DIRECT HIT!"
-
-        # ------------------------------------------
-        # STATE: GAME OVER
-        # ------------------------------------------
-        elif state == STATE_GAME_OVER:
-            if blue_pressed and not prev_blue:
-                generate_terrain()
-                p1_x = random.randint(20, 80)
-                p2_x = random.randint(MAP_W - 100, MAP_W - 40)
-                p1_y = settle_tank(p1_x, 0)
-                p2_y = settle_tank(p2_x, 0)
-                
-                p1_hp = 100
-                p2_hp = 100
-                p1_energy = 50.0
-                p2_energy = 50.0
-                ai_error = 2.5
-                ai_last_p1_x = p1_x
-                
-                p1_hp_bar.width = 50
-                p2_hp_bar.width = 50
-                p1_en_bar.width = 50
-                p2_en_bar.width = 50
-                
-                if "DEFEATED" in status_label.text or "P2 WINS" in status_label.text:
-                    score = 0
-                    score_label.text = "SCORE: 0"
-                
-                state = STATE_P1_AIM
-                p1_preferred_view = VIEW_ZOOMED_P1
-                apply_view(VIEW_ZOOMED_P1)
-                status_label.text = "P1 TURN"
-
-        prev_blue = blue_pressed
-        prev_yellow = yellow_pressed
-        prev_joy = joy_pressed
-
-        p1_body.x = int(p1_x)
-        p1_body.y = int(p1_y)
-        p1_barrel.x = int(p1_x)
-        p1_barrel.y = int(p1_y)
+        const encoder = new TextEncoder();
+        const data = encoder.encode(text + ending); 
         
-        p2_body.x = int(p2_x)
-        p2_body.y = int(p2_y)
-        p2_barrel.x = int(p2_x)
-        p2_barrel.y = int(p2_y)
+        const writer = port.writable.getWriter();
+        await writer.write(data);
+        writer.releaseLock();
+        
+        cmdInput.value = '';
+    }
 
-        display.refresh(target_frames_per_second=40)
+    sendBtn.addEventListener('click', sendData);
+    cmdInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendData(); });
+    clearBtn.addEventListener('click', () => { consoleDiv.textContent = ''; });
+</script>
 
-main()
+</body>
+</html>
